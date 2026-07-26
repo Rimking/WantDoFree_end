@@ -523,6 +523,43 @@ export class StatsService {
     const budgetExecutionRate =
       budgetSum > 0 ? Number((spent / budgetSum).toFixed(4)) : null;
 
+    const journeyRows: Array<{
+      journeyId: string;
+      name: string;
+      prepDone: number;
+      prepTotal: number;
+      coverDone: number;
+      coverTotal: number;
+      score: number;
+    }> = [];
+
+    for (const j of journeys) {
+      const checkItems = checkRows.filter((c) => c.journeyId === j.id);
+      const prepTotal = checkItems.length;
+      const prepDone = checkItems.filter((c) => c.isChecked).length;
+      const destNames = new Set(
+        destRows.filter((d) => d.journeyId === j.id).map((d) => d.name.trim()),
+      );
+      const coverTotal = destNames.size;
+      const thisPlaces =
+        coverTotal > 0
+          ? await this.distinctPlaceNames(userId, [j.id], range.startAt, range.endAt)
+          : [];
+      const coverDone = coverTotal > 0 ? thisPlaces.filter((n) => destNames.has(n)).length : 0;
+      const prepRate = prepTotal > 0 ? prepDone / prepTotal : 1;
+      const coverRate = coverTotal > 0 ? coverDone / coverTotal : 1;
+      const score = Math.round(((prepRate + coverRate) / 2) * 100);
+      journeyRows.push({
+        journeyId: j.id,
+        name: j.title,
+        prepDone,
+        prepTotal,
+        coverDone,
+        coverTotal,
+        score,
+      });
+    }
+
     return this.ok(
       {
         preTripDoneRate,
@@ -531,6 +568,7 @@ export class StatsService {
         visitedPlaces: visited,
         planVsActualGap,
         budgetExecutionRate,
+        journeyRows,
       },
       { type: range.type, start: range.start, end: range.end },
     );
@@ -575,17 +613,34 @@ export class StatsService {
       range.endAt,
     );
 
-    // 完成度分桶：0-25 / 25-50 / 50-75 / 75-100（基于 checklist）
+    // 完成度分桶：0-25 / 25-50 / 50-75 / 75-100（基于 checklist）+ 分旅程明细
     let completionDist: number[] | null = [0, 0, 0, 0];
-    if (journeyIds.length) {
-      for (const jid of journeyIds) {
+    const journeyItems: Array<{
+      id: string;
+      title: string;
+      status: string;
+      startDate: string;
+      endDate: string;
+      completionPct: number;
+    }> = [];
+
+    if (scoped.length) {
+      for (const j of scoped) {
         const items = await this.checklist.find({
-          where: { journeyId: jid, deletedAt: IsNull() },
+          where: { journeyId: j.id, deletedAt: IsNull() },
         });
         const rate = items.length
           ? items.filter((i) => i.isChecked).length / items.length
           : 0;
-        const pct = rate * 100;
+        const pct = Math.round(rate * 100);
+        journeyItems.push({
+          id: j.id,
+          title: j.title,
+          status: normalizeStatus(j.status) ?? j.status,
+          startDate: j.startDate,
+          endDate: j.endDate,
+          completionPct: pct,
+        });
         if (pct < 25) completionDist[0] += 1;
         else if (pct < 50) completionDist[1] += 1;
         else if (pct < 75) completionDist[2] += 1;
@@ -601,6 +656,7 @@ export class StatsService {
         totalDays,
         totalPlaces: places.length,
         completionDist,
+        journeys: journeyItems,
       },
       { type: range.type, start: range.start, end: range.end },
     );
