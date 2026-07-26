@@ -22,13 +22,13 @@ export class QuotaService {
     if (kind === 'photo' && u.usedPhoto + n > u.quotaPhoto) {
       throw new BadRequestException({
         code: 'QUOTA_EXCEEDED',
-        message: '照片配额已用尽，请升级容量包',
+        message: '照片配额已用尽，升级会员解锁 300 张 / 180 分钟',
       });
     }
     if (kind === 'voice' && u.usedVoiceSec + n > u.quotaVoiceSec) {
       throw new BadRequestException({
         code: 'QUOTA_EXCEEDED',
-        message: '语音配额已用尽，请升级容量包',
+        message: '语音配额已用尽，升级会员解锁 300 张 / 180 分钟',
       });
     }
   }
