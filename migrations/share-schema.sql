@@ -16,6 +16,22 @@ CREATE TABLE IF NOT EXISTS `shares` (
   KEY `idx_shares_journey` (`journeyId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 分享归因事件表（北极星：已分享攻略数）。
+-- ⚠️ 关键：此前仅有下方 T6.2 的 ALTER，漏了 CREATE TABLE；开发期靠
+-- synchronize=true 自动建表未暴露，但生产（synchronize 关闭）下该表不存在，
+-- 会导致 POST /shares/:token/view 归因插入 500。现补齐幂等建表。
+CREATE TABLE IF NOT EXISTS `share_events` (
+  `id`        CHAR(36)     NOT NULL,
+  `journeyId` VARCHAR(36)  NOT NULL,
+  `guideId`   VARCHAR(36)  NULL,
+  `channel`   VARCHAR(16)  NOT NULL,
+  `sharerId`  VARCHAR(36)  NOT NULL,
+  `viewerId`  VARCHAR(36)  NULL,
+  `createdAt` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_share_events_journey` (`journeyId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- T6.2 修复：分享归因事件 `guideId` 允许为空。
 -- 背景：分享可在「旅程尚无攻略」时创建（guideId 为 NULL），其浏览归因
 -- (POST /shares/:token/view) 会写入 share_events；若 guideId 列 NOT NULL
