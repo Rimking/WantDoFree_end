@@ -75,7 +75,7 @@ export class User {
   @Column({ type: 'int', default: 50, comment: '免费照片配额(张)' })
   quotaPhoto: number;
 
-  @Column({ type: 'int', default: 3600, comment: '免费语音配额(秒)' })
+  @Column({ type: 'int', default: 1800, comment: '免费语音配额(秒)，对应 30 分钟' })
   quotaVoiceSec: number;
 
   @Column({ type: 'int', default: 0, comment: '已用照片数' })
