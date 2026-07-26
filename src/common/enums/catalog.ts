@@ -130,7 +130,14 @@ export function normalizeExpenseCategory(raw: string): string | null {
   return EXPENSE_ALIASES[raw] ?? null;
 }
 
-export const SHARE_CHANNELS = ['friend', 'moments', 'image'] as const;
+export const SHARE_CHANNELS = [
+  'friend',
+  'moments',
+  'image',
+  'view',
+  'link',
+  'poster',
+] as const;
 export type ShareChannel = (typeof SHARE_CHANNELS)[number];
 
 const SHARE_ALIASES: Record<string, ShareChannel> = {
@@ -138,6 +145,9 @@ const SHARE_ALIASES: Record<string, ShareChannel> = {
   moments: 'moments',
   timeline: 'moments',
   image: 'image',
+  view: 'view',
+  link: 'link',
+  poster: 'poster',
 };
 
 export function normalizeShareChannel(raw: string): ShareChannel | null {
