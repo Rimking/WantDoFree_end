@@ -78,6 +78,18 @@ export class User {
   @Column({ type: 'int', default: 1800, comment: '免费语音配额(秒)，对应 30 分钟' })
   quotaVoiceSec: number;
 
+  /** 会员到期时间（NULL=无到期/永久免费）；pro 且 < now 时惰性降级 free */
+  @Column({ type: 'datetime', nullable: true })
+  memberExpireAt?: Date | null;
+
+  /** 是否自动续费（连续包月/包年） */
+  @Column({ type: 'boolean', default: false })
+  autoRenew: boolean;
+
+  /** 首次开通会员时间 */
+  @Column({ type: 'datetime', nullable: true })
+  memberSinceAt?: Date | null;
+
   @Column({ type: 'int', default: 0, comment: '已用照片数' })
   usedPhoto: number;
 

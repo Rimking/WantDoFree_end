@@ -9,6 +9,7 @@ import { Journey } from '../../entities/journey.entity';
 import { Location } from '../../entities/location.entity';
 import { TravelIdentityDict } from '../../entities/travel-identity-dict.entity';
 import { UserIdentity } from '../../entities/user-identity.entity';
+import { MemberPlan } from '../../entities/member-plan.entity';
 import { StorageModule } from '../../infrastructure/storage/storage.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { StorageModule } from '../../infrastructure/storage/storage.module';
       Location,
       TravelIdentityDict,
       UserIdentity,
+      MemberPlan,
     ]),
     StorageModule,
   ],
