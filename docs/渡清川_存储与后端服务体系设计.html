@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>渡清川 · 存储与后端服务体系设计</title>
+<style>
+  :root{
+    --coral:#FF7A59;--coral-2:#FF9577;--coral-soft:#FFF3F0;
+    --teal:#2BB3A3;--teal-2:#4ECBBE;--teal-soft:#E8F8F6;
+    --blue:#3B9AE1;--blue-soft:#EDF7FC;
+    --gold:#E8A33D;--gold-soft:#FDF5E7;
+    --ink:#173A3A;--ink-2:#425757;--muted:#8A9594;--placeholder:#C4CFCF;
+    --paper:#FBF8F4;--card:#FFFFFF;--line:#F0ECE6;
+    --shadow-sm:0 4px 10px rgba(31,42,46,.05),0 1px 2px rgba(31,42,46,.03);
+    --radius-lg:20px;--radius-md:14px;
+    --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    --mono:"JetBrains Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);font-family:var(--font);color:var(--ink);line-height:1.75;padding:0 0 70px}
+  .wrap{max-width:980px;margin:0 auto;padding:34px 26px}
+  h1{font-size:27px;font-weight:800;margin:0 0 6px;letter-spacing:-.5px}
+  .sub{color:var(--muted);font-size:14px;font-weight:700;margin-bottom:22px}
+  h2{font-size:20px;font-weight:800;margin:36px 0 14px;padding-left:12px;border-left:4px solid var(--coral)}
+  h3{font-size:16px;font-weight:800;margin:22px 0 10px;color:var(--ink-2)}
+  p{margin:10px 0;font-size:15px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:20px 22px;box-shadow:var(--shadow-sm),inset 0 1px 0 rgba(255,255,255,.8);margin:14px 0}
+  pre{background:#10211F;color:#E6F2EF;border-radius:var(--radius-md);padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;margin:10px 0}
+  code{background:#F2F0EC;padding:2px 6px;border-radius:6px;font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
+  pre code{background:transparent;padding:0;color:inherit}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:8px 0;background:var(--card);border-radius:var(--radius-md);overflow:hidden}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:#FBF1EC;font-weight:800;color:var(--ink);font-size:13px}
+  tr:nth-child(even) td{background:#FDFBF8}
+  .pill{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;vertical-align:middle}
+  .pill.coral{background:var(--coral-soft);color:var(--coral)}
+  .pill.teal{background:var(--teal-soft);color:var(--teal)}
+  .pill.blue{background:var(--blue-soft);color:var(--blue)}
+  .pill.gold{background:var(--gold-soft);color:var(--gold)}
+  .pill.gray{background:#F2F5F4;color:var(--muted)}
+  .ok{background:var(--teal-soft);border:1px solid #B9E3DC;border-radius:var(--radius-md);padding:14px 16px;margin:14px 0;font-size:14px;font-weight:700;color:#1E6B62}
+  .warn{background:var(--gold-soft);border:1px solid #EAD3A6;border-radius:var(--radius-md);padding:14px 16px;margin:14px 0;font-size:14px;font-weight:700;color:#8A6A2F}
+  .x{background:var(--coral-soft);border:1px solid #F3C9BC;border-radius:var(--radius-md);padding:14px 16px;margin:14px 0;font-size:14px;font-weight:700;color:#B5472A}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:6px 0;font-size:14px}
+  .foot{margin-top:30px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:14px}
+  .kv{display:flex;gap:10px;margin:6px 0;font-size:14px}
+  .kv b{color:var(--ink-2);min-width:120px;font-weight:800}
+  .mermaid-box{background:#0E1B1A;border-radius:var(--radius-md);padding:14px 16px;color:#CFE9E4;font-family:var(--mono);font-size:12.5px;overflow-x:auto;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>渡清川 · 存储与后端服务体系设计</h1>
+  <div class="sub">文档类型：后端架构设计　|　日期：2026-07-24　|　角色：Backend Architect　|　对齐栈：NestJS 10 + TypeORM 0.3 + MySQL + JWT</div>
+
+  <div class="ok">
+    <b>一句话架构：</b>用<b>存储适配器（Strategy 模式）</b>把"文件存哪"和"业务怎么用"解耦——开发期 <code>driver=local</code> 落本地磁盘、通过后端受控路由回读；上线期改 <code>driver=cos</code> 走腾讯云预签名直传。<b>前端上传契约（prepare → upload → confirm）全程不变</b>，所以"本地先跑、将来上云"是配置级切换，不碰业务代码，也不破坏前后端打通。
+  </div>
+
+  <!-- ============ 一、约束对齐 ============ -->
+  <h2>一、约束对齐（基于你的现状文档）</h2>
+  <table>
+    <tr><th>现状（来自后端现状文档）</th><th>本设计的处理</th></tr>
+    <tr><td>MySQL + TypeORM + NestJS 10，全局前缀 <code>/api</code>、版本 <code>v1</code></td><td>沿用，不换栈、不换 ORM</td></tr>
+    <tr><td>JWT Bearer 鉴权，<code>userId</code> 仅从 token 取</td><td>沿用，强化：任何写操作禁止前端传 <code>userId</code></td></tr>
+    <tr><td><code>media</code> 表仅有 <code>entryId</code>，封面/头像/攻略图无归属位</td><td>重构为<b>多态归属</b> <code>ownerType + ownerId</code>，一处管所有媒体</td></tr>
+    <tr><td>COS / 上传预签名多为 mock</td><td>抽成 <code>StorageDriver</code>，local 真实现、cos 接真预签名；契约一致</td></tr>
+    <tr><td>金额用分、UUID 主键、软删、JSON 列、枚举英文 key</td><td>全部沿用并补全 media 字段</td></tr>
+    <tr><td>开发登录 <code>dev_openid_demo</code>、Swagger 公开</td><td>环境门控：生产环境一律禁用，防调试接口泄漏</td></tr>
+    <tr><td>Redis 未接、统计无缓存</td><td>本设计聚焦存储与媒体；缓存作为后续增强，给出接入点</td></tr>
+  </table>
+
+  <!-- ============ 二、存储适配器 ============ -->
+  <h2>二、存储适配器：本地开发如何"真打通"</h2>
+  <h3>2.1 为什么必须抽象一层</h3>
+  <p>微信小程序不能直接写服务器磁盘，文件必须经 HTTP 上传。如果开发期让前端直传本地后端、生产期直传 COS，两端上传逻辑不同，契约就碎了。抽象出 <code>StorageDriver</code> 后：</p>
+  <ul>
+    <li><b>prepare</b>：业务侧只拿"一个可上传的 URL + 一个确认令牌"，不关心底层是本地还是 COS；</li>
+    <li><b>upload</b>：前端统一用 <code>wx.uploadFile</code> 把文件发到 <code>uploadUrl</code>；</li>
+    <li><b>confirm</b>：上传完成后回注册媒体记录、扣配额。本地和 COS 走同一 confirm，差异只在第一步。</li>
+  </ul>
+
+  <div class="mermaid-box">上传契约（前后端恒定）：
+prepare ──► { uploadUrl, method, headers, fields, mediaId, confirmToken }
+   │
+   ├─ driver=local : uploadUrl = POST /api/v1/media/local-upload (后端写盘+建记录)
+   └─ driver=cos   : uploadUrl = COS 预签名 PUT (前端直传云)
+   │
+   ▼
+confirm ──► { mediaId, confirmToken } ──► 标记 active + 扣配额 + 返回最终媒体 DTO</div>
+
+  <h3>2.2 本地开发存储方案（具体怎么存）</h3>
+  <div class="card">
+    <div class="kv"><b>落盘路径</b><span>按日期分区，避免单目录海量小文件：<code>{UPLOAD_ROOT}/yyyy/mm/dd/{uuid}.{ext}</code>。示例 <code>./uploadImgFile/2026/07/24/9f3a...e2.jpg</code></span></div>
+    <div class="kv"><b>文件名</b><span>服务端随机 UUID，**绝不**用客户端原始文件名（防路径穿越、防中文/特殊字符、防覆盖）</span></div>
+    <div class="kv"><b>回读方式</b><span>后端 <code>FilesController</code> 提供 <code>GET /api/v1/files/:y/:m/:d/:file</code>，做路径穿越校验 +（生产）所有权/签名校验；开发期可放宽但必须挡 <code>..</code></span></div>
+    <div class="kv"><b>容量隔离</b><span><code>UPLOAD_ROOT</code> 放在仓库外（如 <code>~/dqc-storage</code>），不进 git；<code>.gitignore</code> 忽略</span></div>
+    <div class="kv"><b>配额</b><span>落盘成功后 <b>服务端</b>累加 <code>users.usedPhoto / usedVoiceSec</code>，拒绝信任前端自报</span></div>
+  </div>
+
+  <pre><code>// .env（开发）
+STORAGE_DRIVER=local
+UPLOAD_ROOT=/home/dev/dqc-storage/uploads
+FILE_SERVE_PREFIX=/api/v1/files
+# 生产切换：STORAGE_DRIVER=cos + COS_SECRET_ID/KEY/BUCKET/REGION</code></pre>
+
+  <h3>2.3 本地 → COS 迁移路径（零业务改动）</h3>
+  <table>
+    <tr><th>步</th><th>动作</th><th>影响</th></tr>
+    <tr><td>1</td><td>配置 <code>STORAGE_DRIVER=cos</code> + 云凭证</td><td>仅环境变量</td></tr>
+    <tr><td>2</td><td><code>CosStorageDriver.getUploadTarget</code> 返回 COS 预签名 URL</td><td>前端代码不变</td></tr>
+    <tr><td>3</td><td>历史本地文件迁移：脚本扫描 <code>media.driver='local'</code> 记录，批量上传 COS 并回写 <code>url</code> / 置 <code>driver='cos'</code></td><td>一次性脚本，不阻塞业务</td></tr>
+    <tr><td>4</td><td>下线 <code>FilesController</code> 本地回读（或仅保留迁移期）</td><td>生产不再经后端回读静态文件</td></tr>
+  </table>
+
+  <!-- ============ 三、数据库重构 ============ -->
+  <h2>三、数据库设计（现状 + 扩展性）</h2>
+  <p>核心改动：把 <code>media</code> 从"只挂 entry"升级为<b>多态归属实体</b>，一处管理图片/音频及未来所有媒体（头像、封面、攻略图、目的地图）。这是你"组合关系 + 未来扩展"诉求的落点。</p>
+
+  <h3>3.1 media 表（重构后，MySQL DDL）</h3>
+  <pre><code>CREATE TABLE media (
+  id           VARCHAR(36)  PRIMARY KEY,
+  owner_type   VARCHAR(24)  NOT NULL COMMENT 'entry|avatar|journey_cover|guide|destination',
+  owner_id     VARCHAR(36)  NOT NULL,
+  kind         VARCHAR(12)  NOT NULL COMMENT 'image|audio',
+  url          VARCHAR(512) NOT NULL,
+  thumb_url    VARCHAR(512) NULL,
+  mime         VARCHAR(64)  NOT NULL,
+  ext          VARCHAR(8)   NULL,
+  size_bytes   BIGINT       NOT NULL DEFAULT 0,
+  width        INT          NULL,
+  height       INT          NULL,
+  duration_sec INT          NULL COMMENT '音频时长',
+  checksum     VARCHAR(64)  NULL COMMENT 'sha256 去重',
+  sort_order   INT          NOT NULL DEFAULT 0,
+  status       VARCHAR(12)  NOT NULL DEFAULT 'active' COMMENT 'pending|active|deleted',
+  storage_tier VARCHAR(8)   NOT NULL DEFAULT 'hot' COMMENT 'hot|cold',
+  driver       VARCHAR(8)   NOT NULL DEFAULT 'local' COMMENT 'local|cos（迁移标记）',
+  created_by   VARCHAR(36)  NULL,
+  created_at   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  deleted_at   DATETIME(3)  NULL,
+  INDEX idx_owner    (owner_type, owner_id, deleted_at),
+  INDEX idx_checksum (checksum),
+  INDEX idx_created  (created_by, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;</code></pre>
+
+  <div class="card">
+    <h3>设计要点</h3>
+    <ul>
+      <li><b>组合关系落地</b>：一条 entry 通过 <code>owner_type='entry' AND owner_id=:entryId</code> 关联 N 张图 + N 条语音，按 <code>sort_order</code> 排序——文字/定位/花费是 entry 自身字段或 1:1 子表，媒体是"一对多附件"，天然支持"图文音组合"。</li>
+      <li><b>去重</b>：<code>checksum</code> 可识别相同文件，未来支持"上传一次、多处引用"（如封面复用旅行图）。</li>
+      <li><b>软删</b>：<code>deleted_at</code> 与全局约定一致，回收站/审计友好。</li>
+      <li><b>驱动标记</b>：<code>driver</code> 字段让本地→COS 迁移可逐条回写，不影响在线。</li>
+      <li><b>缩略图</b>：<code>thumb_url</code> 预留，未来音频波形图/图片压缩版各取所需，前端首屏不用拉原图。</li>
+    </ul>
+  </div>
+
+  <h3>3.2 users 表扩展（身份与未来）</h3>
+  <pre><code>ALTER TABLE users
+  ADD COLUMN unionid   VARCHAR(64) NULL COMMENT '微信 unionid（跨应用）',
+  ADD COLUMN app_id    VARCHAR(32) NULL COMMENT '小程序 appId（多端）',
+  ADD COLUMN role      VARCHAR(12) NOT NULL DEFAULT 'user' COMMENT 'user|admin',
+  ADD COLUMN status    VARCHAR(12) NOT NULL DEFAULT 'active' COMMENT 'active|blocked|deleted',
+  ADD COLUMN deleted_at DATETIME(3) NULL,
+  ADD UNIQUE KEY uk_unionid (unionid);</code></pre>
+  <p class="sub" style="margin:6px 0">说明：原 <code>openid/appId/role/status</code> 为未来多小程序、后台运营、封禁留位；<code>deleted_at</code> 与软删体系统一，避免物理删账号导致 journey 外键悬空。</p>
+
+  <h3>3.3 关联与组合关系全景</h3>
+  <div class="mermaid-box">users 1─* journeys 1─* entries 1─* media (owner_type='entry')
+                         journeys 1─* destinations (软删)
+                         journeys 1─* checklist_items (软删)
+  复用同一 media：        users 1─* media (owner_type='avatar')
+                         journeys 1─1 media (owner_type='journey_cover')
+                         guides 1─* media (owner_type='guide')
+                         destinations 1─* media (owner_type='destination')</div>
+  <p>所有"存图/存音"的需求都收敛到 <code>media</code> 一张表，<b>新增一种媒体归属只需加一个 <code>owner_type</code> 枚举值</b>，不动表结构——这就是扩展性。</p>
+
+  <!-- ============ 四、接口设计 ============ -->
+  <h2>四、接口设计（聚合 · 效率 · 关联）</h2>
+  <h3>4.1 统一媒体上传契约（前后端恒定）</h3>
+  <table>
+    <tr><th>方法</th><th>路径</th><th>说明</th></tr>
+    <tr><td>POST</td><td><code>/media/prepare</code></td><td>入参 <code>{ ownerType, ownerId, kind, mime, sizeBytes }</code>；返回 <code>{ mediaId, uploadUrl, method, headers, fields, confirmToken }</code></td></tr>
+    <tr><td>POST</td><td><code>/media/local-upload</code></td><td>仅 local 驱动：接收 <code>wx.uploadFile</code>，写盘 + 建 pending 记录，返回 mediaId</td></tr>
+    <tr><td>POST</td><td><code>/media/confirm</code></td><td>入参 <code>{ mediaId, confirmToken }</code>；标记 active、扣配额、回最终媒体 DTO</td></tr>
+    <tr><td>GET</td><td><code>/api/v1/files/:y/:m/:d/:file</code></td><td>本地回读（穿越校验 + 所有权）</td></tr>
+  </table>
+
+  <h3>4.2 聚合响应（避免 N+1，前端一次拿全）</h3>
+  <p><code>GET /journeys/:id/entries</code> 直接内联媒体数组，前端不必为每条 entry 再请求媒体：</p>
+  <pre><code>// 响应结构（entry 聚合 media）
+{
+  "id": "entry-uuid",
+  "type": "photo",
+  "content": "洱海边的清晨",
+  "recordedAt": "2026-07-22T08:30:00+08:00",
+  "dayIndex": 2,
+  "location": { "lat": 25.62, "lng": 100.23, "name": "洱海生态廊道" },
+  "media": [                                 // ← 一对多，一次返回
+    { "id":"m1", "kind":"image", "url":"/api/v1/files/2026/07/22/a.jpg", "width":4032, "height":3024, "sortOrder":0 },
+    { "id":"m2", "kind":"audio", "url":"/api/v1/files/2026/07/22/b.m4a", "durationSec":18, "sortOrder":1 }
+  ]
+}</code></pre>
+  <p class="sub" style="margin:6px 0">实现：Service 层用 TypeORM <code>leftJoinAndSelect('entry.media', 'media')</code>，按 <code>owner_type='entry'</code> 过滤并按 <code>sort_order</code> 排序，由数据库一次取回，杜绝 N+1。</p>
+
+  <h3>4.3 效率与关联约定</h3>
+  <ul>
+    <li><b>分页</b>：列表接口强制 <code>?page=&pageSize=</code>，默认 <code>pageSize=20</code>，上限 100，游标优先于 offset（大数据量）。</li>
+    <li><b>字段选择</b>：媒体列表用投影只取 <code>id,url,kind,thumbUrl</code>，原图不在列表流里。</li>
+    <li><b>统一响应</b>：业务接口裸 JSON；统计沿用 <code>{ code,message,data,range }</code>；错误统一 <code>HttpExceptionFilter</code>。</li>
+    <li><b>幂等</b>：entry 用 <code>clientId</code> 全局唯一 upsert；媒体用 <code>confirmToken</code> 防重复 confirm。</li>
+  </ul>
+
+  <!-- ============ 五、代码脚手架 ============ -->
+  <h2>五、NestJS 代码脚手架（可直接落地）</h2>
+
+  <h3>5.1 存储驱动接口与本地实现</h3>
+  <pre><code>// storage/storage-driver.interface.ts
+export interface UploadTargetInput {
+  ownerType: string; ownerId: string; kind: 'image'|'audio';
+  mime: string; sizeBytes: number;
+}
+export interface UploadTarget {
+  mediaId: string; uploadUrl: string; method: 'POST'|'PUT';
+  headers: Record&lt;string,string&gt;; fields: Record&lt;string,string&gt;;
+  confirmToken: string;
+}
+export interface StoredObject { key: string; url: string; }
+export interface StorageDriver {
+  getUploadTarget(input: UploadTargetInput, mediaId: string, token: string): Promise&lt;UploadTarget&gt;;
+  resolveUrl(key: string): string;
+  delete(key: string): Promise&lt;void&gt;;
+}
+
+// storage/local-storage.driver.ts
+@Injectable()
+export class LocalStorageDriver implements StorageDriver {
+  constructor(@Config() private cfg: ConfigService, private httpAdapter: HttpAdapterHost) {}
+  async getUploadTarget(input: UploadTargetInput, mediaId: string, token: string) {
+    const base = this.cfg.get('APP_BASE_URL');
+    return {
+      mediaId,
+      uploadUrl: `${base}/api/v1/media/local-upload`,
+      method: 'POST',
+      headers: {},
+      fields: { mediaId, confirmToken: token }, // wx.uploadFile 的 formData
+      confirmToken: token,
+    };
+  }
+  resolveUrl(key: string) { // key = 2026/07/22/a.jpg
+    return `${this.cfg.get('FILE_SERVE_PREFIX')}/${key}`;
+  }
+  async delete(key: string) { /* fs.unlink 安全路径校验后删除 */ }
+}</code></pre>
+
+  <h3>5.2 Media 实体（TypeORM）</h3>
+  <pre><code>// entities/media.entity.ts
+@Entity('media')
+export class Media {
+  @PrimaryGeneratedColumn('uuid') id: string;
+  @Column({ type: 'varchar', length: 24 }) ownerType: string;
+  @Column({ type: 'varchar', length: 36 }) ownerId: string;
+  @Column({ type: 'varchar', length: 12 }) kind: 'image'|'audio';
+  @Column({ type: 'varchar', length: 512 }) url: string;
+  @Column({ type: 'varchar', length: 512, nullable: true }) thumbUrl: string|null;
+  @Column({ type: 'varchar', length: 64 }) mime: string;
+  @Column({ type: 'varchar', length: 8, nullable: true }) ext: string|null;
+  @Column({ type: 'bigint', default: 0 }) sizeBytes: number;
+  @Column({ type: 'int', nullable: true }) width: number|null;
+  @Column({ type: 'int', nullable: true }) height: number|null;
+  @Column({ type: 'int', nullable: true }) durationSec: number|null;
+  @Column({ type: 'varchar', length: 64, nullable: true }) checksum: string|null;
+  @Column({ type: 'int', default: 0 }) sortOrder: number;
+  @Column({ type: 'varchar', length: 12, default: 'active' }) status: 'pending'|'active'|'deleted';
+  @Column({ type: 'varchar', length: 8, default: 'hot' }) storageTier: string;
+  @Column({ type: 'varchar', length: 8, default: 'local' }) driver: string;
+  @Column({ type: 'varchar', length: 36, nullable: true }) createdBy: string|null;
+  @CreateDateColumn() createdAt: Date;
+  @UpdateDateColumn() updatedAt: Date;
+  @DeleteDateColumn() deletedAt: Date|null;
+}</code></pre>
+
+  <h3>5.3 Media Service（prepare/confirm/聚合）</h3>
+  <pre><code>// modules/media/media.service.ts（核心节选）
+@Injectable()
+export class MediaService {
+  constructor(@InjectRepository(Media) private repo: Repository&lt;Media&gt;,
+              private drivers: StorageDriverFactory,
+              private users: UserService, @Config() private cfg: ConfigService) {}
+
+  async prepare(dto: PrepareDto, userId: string) {
+    // 1) 服务端配额预检（边界先拦，省一次上传）
+    await this.users.assertQuota(userId, dto.kind, dto.sizeBytes);
+    const mediaId = randomUUID();
+    const token = sign({ mediaId, userId }, this.cfg.get('JWT_SECRET'), { expiresIn: '10m' });
+    const driver = this.drivers.get(); // local | cos
+    const target = await driver.getUploadTarget(dto, mediaId, token);
+    // 写 pending 记录，confirm 时转 active
+    await this.repo.save({ id: mediaId, ownerType: dto.ownerType, ownerId: dto.ownerId,
+      kind: dto.kind, mime: dto.mime, sizeBytes: dto.sizeBytes, status: 'pending',
+      driver: this.cfg.get('STORAGE_DRIVER'), createdBy: userId, url: '' });
+    return target;
+  }
+
+  async confirm(mediaId: string, token: string, userId: string) {
+    const payload = verify(token, this.cfg.get('JWT_SECRET')); // 防伪造
+    if (payload.mediaId !== mediaId) throw new BadRequestException('token mismatch');
+    const m = await this.repo.findOne({ where: { id: mediaId } });
+    if (!m || m.status !== 'pending') throw new NotFoundException();
+    m.status = 'active';
+    await this.repo.save(m);
+    await this.users.incrUsed(userId, m.kind, m.sizeBytes); // 服务端扣配额
+    return this.toDto(m);
+  }
+}</code></pre>
+
+  <h3>5.4 本地回读控制器（防穿越 + 所有权）</h3>
+  <pre><code>// modules/media/files.controller.ts
+@Controller('files')
+export class FilesController {
+  @Get(':y/:m/:d/:file')
+  @UseGuards(JwtAuthGuard)               // 生产必须登录；dev 可放宽到 DevGuard
+  async serve(@Param('y') y, @Param('m') m, @Param('d') d, @Param('file') file, @Req() req) {
+    // 1) 绝对防穿越：拼接后用 path.normalize 再校验仍在 UPLOAD_ROOT 内
+    const safe = path.normalize(path.join(y,m,d,file));
+    if (safe.includes('..') || safe !== path.join(y,m,d,file)) throw new ForbiddenException();
+    const full = path.join(this.cfg.get('UPLOAD_ROOT'), safe);
+    if (!full.startsWith(this.cfg.get('UPLOAD_ROOT'))) throw new ForbiddenException();
+    // 2) 生产：校验该文件 owner 属于当前用户（读 media 表比对 createdBy）
+    return res.sendFile(full);
+  }
+}</code></pre>
+
+  <h3>5.5 统一响应与异常（沿用现状约定）</h3>
+  <pre><code>// common/filters/http-exception.filter.ts（增强：生产剥栈）
+@Catch(HttpException)
+export class HttpExceptionFilter implements ExceptionFilter {
+  catch(ex: HttpException, host: ArgumentsHost) {
+    const res = host.switchToHttp().getResponse();
+    const isProd = process.env.NODE_ENV === 'production';
+    const status = ex.getStatus();
+    const body = ex.getResponse() as any;
+    res.status(status).json({
+      code: body?.code ?? status,
+      message: body?.message ?? ex.message,
+      timestamp: new Date().toISOString(),
+      path: host.switchToHttp().getRequest().url,
+      ...(isProd ? {} : { stack: ex.stack }), // 生产不吐栈
+    });
+  }
+}</code></pre>
+
+  <!-- ============ 六、安全 ============ -->
+  <h2>六、安全设计（调试接口 + 数据安全）</h2>
+
+  <h3>6.1 调试 / 生产隔离</h3>
+  <table>
+    <tr><th>风险点</th><th>措施</th></tr>
+    <tr><td>开发登录 <code>dev_openid_demo</code></td><td><code>if (isProd) throw ForbiddenException('dev login disabled')</code>；生产环境该分支不可达</td></tr>
+    <tr><td>Swagger 暴露</td><td><code>if (!isProd) setupSwagger()</code>；或生产挂 admin 鉴权后开启</td></tr>
+    <tr><td>详细错误/堆栈</td><td>HttpExceptionFilter 生产环境剥离 <code>stack</code>（见 5.5）</td></tr>
+    <tr><td>CORS</td><td>dev 允许前端来源（env <code>CORS_ORIGIN</code>）；prod 白名单严格，禁止 <code>*</code></td></tr>
+    <tr><td>调试路由</td><td>所有 <code>/dev-*</code> 路由统一 <code>DevGuard</code>：生产直接 403</td></tr>
+  </table>
+
+  <h3>6.2 上传安全</h3>
+  <ul>
+    <li><b>MIME / 大小白名单</b>：图片仅 <code>image/jpeg,png,webp</code>；音频仅 <code>audio/m4a,mp3,aac</code>；图片 ≤10MB、音频 ≤30MB（和配额双重约束）。</li>
+    <li><b>随机文件名</b>：UUID + 真实扩展名，<b>绝不用客户端文件名</b>，从根上消除路径穿越。</li>
+    <li><b>checksum 去重</b>：相同 sha256 不重复落盘，省空间也防滥用上传。</li>
+    <li><b>配额服务端强制</b>：prepare 阶段预检、confirm 阶段实扣，前端自报一律无效。</li>
+    <li><b>限流</b>：<code>@nestjs/throttler</code> 对 <code>/auth/*</code> 与 <code>/media/*</code> 限流，防爆破/刷量。</li>
+    <li><b>未来病毒扫描</b>：在 confirm 前留 hook（如 ClamAV / 云扫描），本地 dev 跳过。</li>
+  </ul>
+
+  <h3>6.3 数据安全</h3>
+  <ul>
+    <li><b>userId 仅取 JWT</b>：所有写操作以 <code>req.user.id</code> 为准，DTO 含 <code>userId</code> 字段直接白名单剔除（现状 ValidationPipe whitelist 已支持）。</li>
+    <li><b>PII 加密</b>：<code>users.phone</code> AES-256 落库，响应脱敏；<code>locations.encryptedPoly</code> 位置加密（PIPL 预留）。</li>
+    <li><b>媒体 URL 签名</b>：生产 COS URL 带过期签名；本地回读走 6.4 所有权校验。</li>
+    <li><b>参数化查询</b>：TypeORM 全程参数化，杜绝 SQL 注入（禁止字符串拼接 SQL）。</li>
+    <li><b>PIPL 导出</b>：沿用 <code>GET /me/export</code>，提供数据可携与删除。</li>
+  </ul>
+
+  <!-- ============ 七、验收 ============ -->
+  <h2>七、落地验收清单</h2>
+  <table>
+    <tr><th>维度</th><th>验收项</th><th>过 ☑</th></tr>
+    <tr><td>契约</td><td>本地 dev 下，小程序 <code>wx.uploadFile</code> 经 prepare→upload→confirm 成功落本地盘并回读</td><td></td></tr>
+    <tr><td>切换</td><td>改 <code>STORAGE_DRIVER=cos</code> 后，前端代码零改动可直传云</td><td></td></tr>
+    <tr><td>聚合</td><td><code>GET /entries</code> 单次响应含 media 数组，无额外请求</td><td></td></tr>
+    <tr><td>安全</td><td>生产环境 <code>dev_openid_demo</code>、Swagger、详细堆栈均不可达</td><td></td></tr>
+    <tr><td>安全</td><td>上传非白名单类型/超大文件被拒；<code>../</code> 穿越被拦</td><td></td></tr>
+    <tr><td>配额</td><td>超配额时 prepare 即拒；confirm 后 usedPhoto/usedVoiceSec 正确累加</td><td></td></tr>
+    <tr><td>扩展</td><td>新增"攻略图"只需加 <code>owner_type='guide'</code> 枚举，无表结构变更</td><td></td></tr>
+  </table>
+
+  <div class="warn">
+    <b>与你现状的两处必须同步：</b>① <code>media</code> 表从 <code>entryId</code> 改为多态 <code>ownerType/ownerId</code>，需写 migration（现状开发期靠 synchronize，生产需补 migration）；② 现有 <code>/media/upload-url</code> + <code>/media/confirm</code> 的 mock 预签名，按本设计的 <code>/media/prepare</code> 统一契约收敛，前端对接文档要同步更新。
+  </div>
+
+  <div class="foot">
+    配套文档：后端现状《后端服务现状与数据库设计.md》、统计模块前后端对照、各 UI/PRD 设计稿。本设计为后端架构层，落地前需与前端确认上传契约与媒体响应结构，并做一次 dev/prod 安全配置评审。
+  </div>
+
+</div>
+</body>
+</html>
