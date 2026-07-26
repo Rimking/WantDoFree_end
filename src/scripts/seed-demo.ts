@@ -26,6 +26,7 @@ import { UserIdentity } from '../entities/user-identity.entity';
 import { Destination } from '../entities/destination.entity';
 import { ChecklistItem } from '../entities/checklist-item.entity';
 import { UserStatsSnapshot } from '../entities/user-stats-snapshot.entity';
+import { MemberPlan } from '../entities/member-plan.entity';
 import {
   normalizeExpenseCategory,
   themeLabelOf,
@@ -155,6 +156,7 @@ async function main() {
       Destination,
       ChecklistItem,
       UserStatsSnapshot,
+      MemberPlan,
     ],
     synchronize: true,
   });
@@ -163,6 +165,7 @@ async function main() {
 
   await wipeDemo(ds);
   await seedUser(ds);
+  await seedMemberPlans(ds);
   const ctx = repos(ds);
 
   await seedJourneys(ctx);
@@ -267,6 +270,56 @@ async function seedUser(ds: DataSource) {
     [USER_ID, USER_ID],
   );
   console.log('✓ user + profile + identities');
+}
+
+/** 会员套餐种子（运营配置，幂等 upsert，按 code 去重）。 */
+async function seedMemberPlans(ds: DataSource) {
+  const repo = ds.getRepository(MemberPlan);
+  const plans: Partial<MemberPlan>[] = [
+    {
+      code: 'monthly',
+      name: '连续包月',
+      priceCent: 1800, // ¥18/月
+      periodDays: 30,
+      autoRenew: true,
+      originalPriceCent: null,
+      firstMonthDiscountCent: 900, // 首月特惠 ¥9
+      tag: '首月特惠',
+      sort: 1,
+      active: true,
+    },
+    {
+      code: 'yearly',
+      name: '连续包年',
+      priceCent: 12800, // ¥128/年（主推）
+      periodDays: 365,
+      autoRenew: true,
+      originalPriceCent: null,
+      firstMonthDiscountCent: null,
+      tag: '主推',
+      sort: 2,
+      active: true,
+    },
+    {
+      code: 'yearly_once',
+      name: '单年',
+      priceCent: 16800, // ¥168/年
+      periodDays: 365,
+      autoRenew: false,
+      originalPriceCent: null,
+      firstMonthDiscountCent: null,
+      tag: null,
+      sort: 3,
+      active: true,
+    },
+  ];
+  for (const p of plans) {
+    await repo.upsert(repo.create(p), {
+      conflictPaths: ['code'],
+      skipUpdateIfNoValuesChanged: true,
+    });
+  }
+  console.log('✓ member_plans（连续包月¥18/首月¥9 · 连续包年¥128主推 · 单年¥168）');
 }
 
 function repos(ds: DataSource) {
