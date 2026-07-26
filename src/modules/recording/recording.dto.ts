@@ -136,7 +136,7 @@ export class PatchRecordDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(500)
+  @MaxLength(2000)
   content?: string | null;
 
   @IsOptional()
