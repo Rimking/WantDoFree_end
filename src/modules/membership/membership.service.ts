@@ -14,26 +14,14 @@ import {
   RefundDto,
   SetRenewalDto,
 } from './membership.dto';
-
-/** 会员权益标识（与权益矩阵 §1 对齐；前端按 key 解锁功能）。 */
-export const MEMBER_BENEFITS_PRO = [
-  'photo_300',
-  'voice_180min',
-  'ai_organize',
-  'export_1080p',
-  'multi_device',
-  'premium_templates',
-  'map_style',
-];
-export const MEMBER_BENEFITS_FREE = ['photo_50', 'voice_30min', 'basic_templates'];
+import {
+  MEMBER_BENEFITS_PRO,
+  MEMBER_BENEFITS_FREE,
+  MemberBenefitService,
+} from './member-benefit.service';
 
 /** 未支付订单的关单时限（分钟）。 */
 const ORDER_EXPIRE_MINUTES = 15;
-/** 会员配额（激活时联动，降级时回退）。 */
-const PRO_QUOTA_PHOTO = 300;
-const PRO_QUOTA_VOICE_SEC = 10800;
-const FREE_QUOTA_PHOTO = 50;
-const FREE_QUOTA_VOICE_SEC = 1800;
 
 @Injectable()
 export class MembershipService {
@@ -42,6 +30,7 @@ export class MembershipService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(MemberPlan)
     private readonly plans: Repository<MemberPlan>,
+    private readonly benefit: MemberBenefitService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -68,9 +57,9 @@ export class MembershipService {
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('user not found');
 
-    // 先按原始状态算 status（过期则一次性返回 EXPIRED），再惰性降级落库。
-    const status = this.computeStatus(user);
-    const changed = this.reconcileExpiry(user);
+    // 先算展示状态（过期则返回 EXPIRED），再惰性降级落库（共享服务，幂等）。
+    const status = this.benefit.computeStatus(user);
+    const changed = this.benefit.reconcileExpiry(user);
     if (changed) await this.users.save(user);
 
     return {
@@ -149,7 +138,7 @@ export class MembershipService {
       });
       if (!user) throw new NotFoundException('user not found');
 
-      this.applyBenefits(user, 'pro', order.periodDays ?? 30, order.autoRenew);
+      this.benefit.applyBenefits(user, 'pro', order.periodDays ?? 30, order.autoRenew);
       await manager.save(user);
 
       return {
@@ -240,59 +229,12 @@ export class MembershipService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!user) throw new NotFoundException('user not found');
-      this.applyBenefits(user, 'free');
+      this.benefit.applyBenefits(user, 'free');
       await manager.save(user);
 
       return { refundId: order.refundId, status: 'refunded', plan: user.plan };
     });
   }
 
-  // ---- 权益联动（applyBenefits，T3.3 抽为共享幂等服务） ----
-
-  /** 激活/降级会员权益：直接改 user.plan + 配额；幂等（同值复写无害）。 */
-  applyBenefits(
-    user: User,
-    plan: 'free' | 'pro',
-    periodDays?: number,
-    autoRenew?: boolean,
-  ): void {
-    if (plan === 'pro') {
-      user.plan = 'pro';
-      user.quotaPhoto = PRO_QUOTA_PHOTO;
-      user.quotaVoiceSec = PRO_QUOTA_VOICE_SEC;
-      user.memberExpireAt = periodDays
-        ? new Date(Date.now() + periodDays * 86_400_000)
-        : null;
-      user.autoRenew = !!autoRenew;
-      if (!user.memberSinceAt) user.memberSinceAt = new Date();
-    } else {
-      user.plan = 'free';
-      user.quotaPhoto = FREE_QUOTA_PHOTO;
-      user.quotaVoiceSec = FREE_QUOTA_VOICE_SEC;
-      user.memberExpireAt = null;
-      user.autoRenew = false;
-    }
-  }
-
-  /** 惰性降级：pro 且过期 → free（配额回退，不删数据）。返回是否发生变更。 */
-  reconcileExpiry(user: User): boolean {
-    if (
-      user.plan === 'pro' &&
-      user.memberExpireAt &&
-      user.memberExpireAt.getTime() < Date.now()
-    ) {
-      this.applyBenefits(user, 'free');
-      return true;
-    }
-    return false;
-  }
-
-  private computeStatus(
-    u: User,
-  ): 'FREE' | 'ACTIVE' | 'EXPIRED' {
-    if (u.plan !== 'pro') return 'FREE';
-    if (!u.memberExpireAt || u.memberExpireAt.getTime() >= Date.now())
-      return 'ACTIVE';
-    return 'EXPIRED';
-  }
+  // ---- 权益联动已抽为共享服务 MemberBenefitService（见 member-benefit.service.ts） ----
 }

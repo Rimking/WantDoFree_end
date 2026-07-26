@@ -11,6 +11,7 @@ import { TravelIdentityDict } from '../../entities/travel-identity-dict.entity';
 import { UserIdentity } from '../../entities/user-identity.entity';
 import { MemberPlan } from '../../entities/member-plan.entity';
 import { StorageModule } from '../../infrastructure/storage/storage.module';
+import { MemberBenefitModule } from '../membership/member-benefit.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { StorageModule } from '../../infrastructure/storage/storage.module';
       MemberPlan,
     ]),
     StorageModule,
+    MemberBenefitModule,
   ],
   controllers: [UserController, ProfileController],
   providers: [UserService],

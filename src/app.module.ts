@@ -20,6 +20,7 @@ import { DestinationModule } from './modules/destination/destination.module';
 import { ChecklistModule } from './modules/checklist/checklist.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { MembershipModule } from './modules/membership/membership.module';
+import { MemberBenefitModule } from './modules/membership/member-benefit.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { MembershipModule } from './modules/membership/membership.module';
     ChecklistModule,
     StatsModule,
     MembershipModule,
+    MemberBenefitModule,
   ],
 })
 export class AppModule {}

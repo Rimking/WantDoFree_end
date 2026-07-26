@@ -13,6 +13,7 @@ import { Location } from '../../entities/location.entity';
 import { TravelIdentityDict } from '../../entities/travel-identity-dict.entity';
 import { UserIdentity } from '../../entities/user-identity.entity';
 import { StorageService } from '../../infrastructure/storage/storage.service';
+import { MemberBenefitService } from '../membership/member-benefit.service';
 import {
   AvatarPresignDto,
   PatchUserProfileDto,
@@ -45,6 +46,7 @@ export class UserService implements OnModuleInit {
     @InjectRepository(UserIdentity)
     private readonly userIdentities: Repository<UserIdentity>,
     private readonly storage: StorageService,
+    private readonly benefit: MemberBenefitService,
   ) {}
 
   async onModuleInit() {
@@ -81,6 +83,8 @@ export class UserService implements OnModuleInit {
   async getById(id: string) {
     const u = await this.users.findOne({ where: { id } });
     if (!u) throw new NotFoundException('user not found');
+    // 读取时惰性降级：pro 且过期 → free（配额回退），仅变更时落库（幂等）。
+    if (this.benefit.reconcileExpiry(u)) await this.users.save(u);
     return this.toLegacyUserResponse(u);
   }
 
@@ -137,6 +141,7 @@ export class UserService implements OnModuleInit {
   async getProfile(userId: string) {
     const u = await this.users.findOne({ where: { id: userId } });
     if (!u) throw new NotFoundException('user not found');
+    if (this.benefit.reconcileExpiry(u)) await this.users.save(u);
 
     const identities = await this.userIdentities.find({
       where: { userId },

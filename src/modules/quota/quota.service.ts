@@ -6,11 +6,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../entities/user.entity';
+import { MemberBenefitService } from '../membership/member-benefit.service';
 
 @Injectable()
 export class QuotaService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
+    private readonly benefit: MemberBenefitService,
   ) {}
 
   /** 上传前校验免费配额，超额抛错引导付费（记录/分享永不收费，仅容量收费）。 */
@@ -43,6 +45,8 @@ export class QuotaService {
   async getStatus(userId: string) {
     const u = await this.users.findOne({ where: { id: userId } });
     if (!u) throw new NotFoundException('user not found');
+    // 读取时惰性降级：pro 且过期 → free（配额回退），仅变更时落库（幂等）。
+    if (this.benefit.reconcileExpiry(u)) await this.users.save(u);
     return {
       plan: u.plan,
       photo: {
