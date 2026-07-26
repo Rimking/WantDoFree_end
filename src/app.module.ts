@@ -19,6 +19,7 @@ import { DraftModule } from './modules/draft/draft.module';
 import { DestinationModule } from './modules/destination/destination.module';
 import { ChecklistModule } from './modules/checklist/checklist.module';
 import { StatsModule } from './modules/stats/stats.module';
+import { MembershipModule } from './modules/membership/membership.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { StatsModule } from './modules/stats/stats.module';
     DestinationModule,
     ChecklistModule,
     StatsModule,
+    MembershipModule,
   ],
 })
 export class AppModule {}
