@@ -28,12 +28,12 @@ export class ShareEvent {
   @JoinColumn({ name: 'journeyId' })
   journey: Journey;
 
-  @Column({ length: 36 })
-  guideId: string;
+  @Column({ nullable: true, length: 36 })
+  guideId?: string;
 
   @ManyToOne(() => Guide, (g) => g.shareEvents, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'guideId' })
-  guide: Guide;
+  guide?: Guide;
 
   @Column({ type: 'varchar', length: 16 })
   channel: ShareChannel;

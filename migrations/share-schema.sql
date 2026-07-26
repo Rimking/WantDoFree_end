@@ -15,3 +15,20 @@ CREATE TABLE IF NOT EXISTS `shares` (
   UNIQUE KEY `uq_shares_token` (`token`),
   KEY `idx_shares_journey` (`journeyId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- T6.2 修复：分享归因事件 `guideId` 允许为空。
+-- 背景：分享可在「旅程尚无攻略」时创建（guideId 为 NULL），其浏览归因
+-- (POST /shares/:token/view) 会写入 share_events；若 guideId 列 NOT NULL
+-- 无默认值则插入报 500（QueryFailedError: Field 'guideId' doesn't have a
+-- default value）。实体已改为 nullable，此处补齐生产手工迁移。
+-- 幂等：仅当列当前为 NOT NULL 时执行 ALTER。
+SET @s = (SELECT IF(
+  (SELECT IS_NULLABLE FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'share_events'
+     AND column_name = 'guideId') = 'NO',
+  'ALTER TABLE `share_events` MODIFY `guideId` VARCHAR(36) NULL;',
+  'SELECT 1'));
+PREPARE stmt FROM @s;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
