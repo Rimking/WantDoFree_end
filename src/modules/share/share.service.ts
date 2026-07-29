@@ -15,6 +15,8 @@ import { User } from '../../entities/user.entity';
 import { ShareEvent } from '../../entities/share-event.entity';
 import { normalizeThemeTag, themeLabelOf } from '../../common/enums/catalog';
 
+import { MemberBenefitService } from '../membership/member-benefit.service';
+
 type GuidePayloadLite = {
   highlights?: Array<{
     type: string;
@@ -39,6 +41,7 @@ export class ShareService {
     @InjectRepository(ShareEvent)
     private readonly shareEvents: Repository<ShareEvent>,
     private readonly config: ConfigService,
+    private readonly benefit: MemberBenefitService,
   ) {}
 
   /** 生成全局唯一短码（base64url，12 位）。 */
@@ -104,18 +107,48 @@ export class ShareService {
       this.config.get<string>('APP_PUBLIC_BASE_URL') || 'https://duqingchuan.app/s';
     const title = `${journey.title} · 旅程手帐`;
     const image = guide?.coverUrl ?? journey.coverUrl ?? undefined;
+    const sharer = await this.users.findOne({ where: { id: userId } });
+    const exportPolicy = sharer
+      ? this.benefit.exportPolicyOf(sharer)
+      : {
+          watermark: true,
+          watermarkText: '渡清川·免费版',
+          maxResolution: 720 as const,
+        };
 
     return {
       token,
       sharePath: path,
       visibility: share.visibility,
+      exportPolicy,
       channels: {
         friend: { title, path, image },
         moments: { title, path, image },
         link: { url: `${webBase}/${token}` },
-        poster: { title, cover: image, path },
+        poster: {
+          title,
+          cover: image,
+          path,
+          watermark: exportPolicy.watermark,
+          watermarkText: exportPolicy.watermarkText,
+          maxResolution: exportPolicy.maxResolution,
+        },
+        saveImage: {
+          watermark: exportPolicy.watermark,
+          watermarkText: exportPolicy.watermarkText,
+          maxResolution: exportPolicy.maxResolution,
+        },
       },
     };
+  }
+
+  /** 当前用户导出策略（分享面板红绿标）。 */
+  async exportPolicyForUser(userId: string) {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('user not found');
+    this.benefit.reconcileExpiry(user);
+    await this.users.save(user);
+    return this.benefit.exportPolicyOf(user);
   }
 
   /** 免登录只读内容（脱敏：不含精确经纬度）。 */
@@ -159,6 +192,13 @@ export class ShareService {
     return {
       token: share.token,
       visibility: share.visibility,
+      exportPolicy: sharer
+        ? this.benefit.exportPolicyOf(sharer)
+        : {
+            watermark: true,
+            watermarkText: '渡清川·免费版',
+            maxResolution: 720 as const,
+          },
       sharer: sharer
         ? { id: sharer.id, nick: sharer.nick ?? '', avatar: sharer.avatar ?? null }
         : null,

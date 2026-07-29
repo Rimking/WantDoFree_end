@@ -30,6 +30,8 @@ function assert(name: string, cond: boolean): void {
   }
 }
 
+import { MemberBenefitService } from '../modules/membership/member-benefit.service';
+
 /** 极简内存仓储：实现 ShareService 实际用到的 findOne/find/save/create。 */
 class InMemoryRepository<T extends Record<string, any>> {
   rows: T[] = [];
@@ -104,6 +106,7 @@ const svc = new ShareService(
   userRepo as unknown as Repository<User>,
   shareEventRepo as unknown as Repository<ShareEvent>,
   { get: () => undefined } as unknown as any,
+  new MemberBenefitService(),
 );
 
 console.log('T4.7 逻辑自测 · ShareService 分享全链路');

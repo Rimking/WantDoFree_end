@@ -43,4 +43,11 @@ export class ShareController {
   stats(@CurrentUser() u: { id: string }) {
     return this.share.getShareStats(u.id);
   }
+
+  /** 当前用户导出/海报水印策略（分享面板用）。 */
+  @Get('share/export-policy')
+  @UseGuards(JwtAuthGuard)
+  exportPolicy(@CurrentUser() u: { id: string }) {
+    return this.share.exportPolicyForUser(u.id);
+  }
 }

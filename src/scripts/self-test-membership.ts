@@ -108,11 +108,12 @@ assert('setRenewal(true) 等价翻转生效', off.autoRenew === true);
 
 console.log('--- 6) 权益矩阵与配额常量一致 ---');
 assert(
-  'PRO 权益含 photo_300/voice_180min/ai_organize/export_1080p',
+  'PRO 权益含 photo_300/voice_180min/ai_organize/export_1080p/no_watermark',
   MEMBER_BENEFITS_PRO.includes('photo_300') &&
     MEMBER_BENEFITS_PRO.includes('voice_180min') &&
     MEMBER_BENEFITS_PRO.includes('ai_organize') &&
-    MEMBER_BENEFITS_PRO.includes('export_1080p'),
+    MEMBER_BENEFITS_PRO.includes('export_1080p') &&
+    MEMBER_BENEFITS_PRO.includes('no_watermark'),
 );
 assert(
   'FREE 权益为 photo_50/voice_30min/basic_templates',

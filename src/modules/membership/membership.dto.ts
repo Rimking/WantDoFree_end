@@ -5,6 +5,11 @@ export class CreateMembershipOrderDto {
   @IsString()
   @IsNotEmpty()
   planCode: string;
+
+  /** 可选召回券 id（P0 stub 接受但不实扣） */
+  @IsOptional()
+  @IsString()
+  couponId?: string;
 }
 
 /** 开关自动续费。 */

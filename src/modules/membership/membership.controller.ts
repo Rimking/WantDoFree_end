@@ -17,24 +17,38 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('membership')
-@UseGuards(JwtAuthGuard)
 export class MembershipController {
   constructor(private readonly membership: MembershipService) {}
 
-  /** 套餐列表（运营配置驱动）。 */
+  /** 套餐列表（可未登录）；首购有效价请结合 GET /membership/me.firstMonthEligible */
   @Get('plans')
   plans() {
     return this.membership.listPlans();
   }
 
-  /** 我的会员状态（含惰性降级判定）。 */
+  /** 我的会员状态 */
   @Get('me')
+  @UseGuards(JwtAuthGuard)
   me(@CurrentUser() u: { id: string }) {
     return this.membership.getMe(u.id);
   }
 
-  /** 创建会员订单（mock，不调微信）。 */
+  /** PRD 别名：同 /membership/me */
+  @Get('status')
+  @UseGuards(JwtAuthGuard)
+  status(@CurrentUser() u: { id: string }) {
+    return this.membership.getMe(u.id);
+  }
+
+  /** 流失挽回 stub */
+  @Get('winback')
+  @UseGuards(JwtAuthGuard)
+  winback(@CurrentUser() u: { id: string }) {
+    return this.membership.getWinback(u.id);
+  }
+
   @Post('orders')
+  @UseGuards(JwtAuthGuard)
   createOrder(
     @CurrentUser() u: { id: string },
     @Body() dto: CreateMembershipOrderDto,
@@ -42,20 +56,20 @@ export class MembershipController {
     return this.membership.createOrder(u.id, dto);
   }
 
-  /** Mock 确认支付：订单置 paid → 激活会员 → 联动配额。 */
   @Post('orders/:orderNo/pay')
+  @UseGuards(JwtAuthGuard)
   pay(@CurrentUser() u: { id: string }, @Param('orderNo') orderNo: string) {
     return this.membership.payOrder(orderNo, u.id);
   }
 
-  /** 订单状态查询（轮询兜底）。 */
   @Get('orders/:orderNo')
+  @UseGuards(JwtAuthGuard)
   order(@CurrentUser() u: { id: string }, @Param('orderNo') orderNo: string) {
     return this.membership.getOrder(orderNo, u.id);
   }
 
-  /** 取消未支付订单。 */
   @Post('orders/:orderNo/cancel')
+  @UseGuards(JwtAuthGuard)
   cancel(
     @CurrentUser() u: { id: string },
     @Param('orderNo') orderNo: string,
@@ -63,14 +77,14 @@ export class MembershipController {
     return this.membership.cancelOrder(orderNo, u.id);
   }
 
-  /** 开关自动续费。 */
   @Patch('renewal')
+  @UseGuards(JwtAuthGuard)
   renewal(@CurrentUser() u: { id: string }, @Body() dto: SetRenewalDto) {
     return this.membership.setRenewal(u.id, dto);
   }
 
-  /** 申请退款（mock）。 */
   @Post('refund')
+  @UseGuards(JwtAuthGuard)
   refund(@CurrentUser() u: { id: string }, @Body() dto: RefundDto) {
     return this.membership.refund(u.id, dto);
   }

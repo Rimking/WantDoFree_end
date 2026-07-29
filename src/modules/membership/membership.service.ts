@@ -3,9 +3,12 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { User } from '../../entities/user.entity';
 import { Order } from '../../entities/order.entity';
 import { MemberPlan } from '../../entities/member-plan.entity';
@@ -19,9 +22,11 @@ import {
   MEMBER_BENEFITS_FREE,
   MemberBenefitService,
 } from './member-benefit.service';
+import { InviteService } from '../invite/invite.service';
 
 /** 未支付订单的关单时限（分钟）。 */
 const ORDER_EXPIRE_MINUTES = 15;
+const MEMBERSHIP_PLAN_CODES = ['monthly', 'yearly', 'yearly_once'];
 
 @Injectable()
 export class MembershipService {
@@ -32,53 +37,159 @@ export class MembershipService {
     private readonly plans: Repository<MemberPlan>,
     private readonly benefit: MemberBenefitService,
     private readonly dataSource: DataSource,
+    @Optional()
+    @Inject(forwardRef(() => InviteService))
+    private readonly invite?: InviteService,
   ) {}
 
-  /** 套餐列表（运营配置驱动，按 sort 升序；仅上架）。 */
-  async listPlans() {
+  async listPlans(userId?: string) {
     const rows = await this.plans.find({
       where: { active: true },
       order: { sort: 'ASC' },
     });
-    return rows.map((p) => ({
-      code: p.code,
-      name: p.name,
-      priceCent: p.priceCent,
-      periodDays: p.periodDays,
-      autoRenew: p.autoRenew,
-      tag: p.tag ?? null,
-      originalPriceCent: p.originalPriceCent ?? null,
-      firstMonthDiscountCent: p.firstMonthDiscountCent ?? null,
-    }));
+    const firstMonthEligible = userId
+      ? await this.isFirstMonthEligible(userId)
+      : true;
+
+    return rows.map((p) => {
+      const useFirst =
+        p.code === 'monthly' &&
+        firstMonthEligible &&
+        p.firstMonthDiscountCent != null;
+      const effectivePriceCent = useFirst
+        ? (p.firstMonthDiscountCent as number)
+        : p.priceCent;
+      return {
+        code: p.code,
+        name: p.name,
+        priceCent: p.priceCent,
+        /** 未登录时按「可享首月」展示；下单以服务端 createOrder 为准 */
+        effectivePriceCent,
+        periodDays: p.periodDays,
+        autoRenew: p.autoRenew,
+        tag: p.tag ?? null,
+        originalPriceCent: p.originalPriceCent ?? null,
+        firstMonthDiscountCent: p.firstMonthDiscountCent ?? null,
+      };
+    });
   }
 
-  /** 我的会员状态（含惰性降级判定）。 */
+  async isFirstMonthEligible(userId: string) {
+    const paid = await this.orders.count({
+      where: {
+        userId,
+        status: 'paid',
+        planCode: In(MEMBERSHIP_PLAN_CODES),
+      },
+    });
+    return paid === 0;
+  }
+
+  /** 我的会员状态（含惰性降级、导出策略、配额摘要）。 */
   async getMe(userId: string) {
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('user not found');
 
-    // 先算展示状态（过期则返回 EXPIRED），再惰性降级落库（共享服务，幂等）。
-    const status = this.benefit.computeStatus(user);
     const changed = this.benefit.reconcileExpiry(user);
     if (changed) await this.users.save(user);
+
+    const status = this.benefit.computeStatus(user);
+    const expireAt = user.memberExpireAt ?? null;
+    const daysLeft =
+      status === 'ACTIVE' && expireAt
+        ? Math.max(
+            0,
+            Math.ceil((expireAt.getTime() - Date.now()) / 86_400_000),
+          )
+        : null;
+    const nearExpire = daysLeft != null && daysLeft <= 7;
+
+    const pending = await this.orders.findOne({
+      where: { userId, status: 'pending' },
+      order: { createdAt: 'DESC' },
+    });
+
+    const firstMonthEligible = await this.isFirstMonthEligible(userId);
+    const exportPolicy = this.benefit.exportPolicyOf(user);
 
     return {
       plan: user.plan,
       status,
-      expireAt: user.memberExpireAt ?? null,
+      displayStatus: status,
+      expireAt,
       autoRenew: user.autoRenew,
+      memberSinceAt: user.memberSinceAt ?? null,
+      daysLeft,
+      nearExpire,
       benefits: user.plan === 'pro' ? MEMBER_BENEFITS_PRO : MEMBER_BENEFITS_FREE,
+      firstMonthEligible,
+      exportPolicy,
+      quota: {
+        photo: {
+          used: user.usedPhoto,
+          quota: user.quotaPhoto,
+          remaining: Math.max(0, user.quotaPhoto - user.usedPhoto),
+        },
+        voiceSec: {
+          used: user.usedVoiceSec,
+          quota: user.quotaVoiceSec,
+          remaining: Math.max(0, user.quotaVoiceSec - user.usedVoiceSec),
+          unit: 'second' as const,
+        },
+      },
+      pendingOrderNo: pending?.id ?? null,
     };
   }
 
-  /** 创建会员订单（不调微信，返回 orderNo + mockPayToken 占位）。 */
+  /** 流失挽回 stub：过期 ≥3 天返回展示用召回券（不实扣）。 */
+  async getWinback(userId: string) {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('user not found');
+    this.benefit.reconcileExpiry(user);
+    await this.users.save(user);
+
+    const since = user.memberExpireAt ?? user.updatedAt;
+    const expiredDays = since
+      ? Math.floor((Date.now() - new Date(since).getTime()) / 86_400_000)
+      : 0;
+    const available =
+      !!user.memberSinceAt &&
+      user.plan === 'free' &&
+      expiredDays >= 3;
+
+    return {
+      available,
+      expiredDays: available ? expiredDays : 0,
+      journeyHint: available
+        ? '回忆这一年的旅程，用召回券续费更划算'
+        : null,
+      coupon: available
+        ? {
+            id: 'winback_stub',
+            planCode: 'yearly_once',
+            amountOffCent: 6900,
+            title: '老友召回 · 续费立减 ¥69',
+            validDays: 7,
+            note: '展示用 stub，正式核销 P1 落地',
+          }
+        : null,
+    };
+  }
+
   async createOrder(userId: string, dto: CreateMembershipOrderDto) {
     const plan = await this.plans.findOne({
       where: { code: dto.planCode, active: true },
     });
     if (!plan) throw new BadRequestException(`unknown plan: ${dto.planCode}`);
 
-    const effectivePriceCent = plan.firstMonthDiscountCent ?? plan.priceCent;
+    const firstMonthEligible = await this.isFirstMonthEligible(userId);
+    const useFirst =
+      plan.code === 'monthly' &&
+      firstMonthEligible &&
+      plan.firstMonthDiscountCent != null;
+    const effectivePriceCent = useFirst
+      ? (plan.firstMonthDiscountCent as number)
+      : plan.priceCent;
     const expireAt = new Date(Date.now() + ORDER_EXPIRE_MINUTES * 60_000);
 
     const order = await this.orders.save(
@@ -91,6 +202,7 @@ export class MembershipService {
         periodDays: plan.periodDays,
         autoRenew: plan.autoRenew,
         expireAt,
+        couponId: dto.couponId ?? null,
       }),
     );
     return {
@@ -98,13 +210,15 @@ export class MembershipService {
       mockPayToken: `mock_${order.id}`,
       amountCent: effectivePriceCent,
       planCode: plan.code,
+      periodDays: plan.periodDays,
+      autoRenew: plan.autoRenew,
+      firstMonthApplied: useFirst,
       expireAt: order.expireAt,
     };
   }
 
-  /** Mock 确认支付：订单置 paid → 激活会员 → 联动配额。幂等（已 paid 直接返回）。 */
   async payOrder(orderNo: string, userId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: orderNo },
         lock: { mode: 'pessimistic_write' },
@@ -126,6 +240,12 @@ export class MembershipService {
       if (order.status !== 'pending')
         throw new BadRequestException(`order status is ${order.status}`);
 
+      if (order.expireAt && order.expireAt.getTime() < Date.now()) {
+        order.status = 'expired';
+        await manager.save(order);
+        throw new BadRequestException('order expired');
+      }
+
       order.status = 'paid';
       order.transactionId = `mock_tx_${Date.now()}`;
       order.paidAt = new Date();
@@ -138,7 +258,12 @@ export class MembershipService {
       });
       if (!user) throw new NotFoundException('user not found');
 
-      this.benefit.applyBenefits(user, 'pro', order.periodDays ?? 30, order.autoRenew);
+      this.benefit.applyBenefits(
+        user,
+        'pro',
+        order.periodDays ?? 30,
+        order.autoRenew,
+      );
       await manager.save(user);
 
       return {
@@ -149,9 +274,18 @@ export class MembershipService {
         expireAt: user.memberExpireAt ?? null,
       };
     });
+
+    // 邀请发奖放事务外，避免循环依赖死锁；失败不影响支付成功
+    if (!result.alreadyPaid && this.invite) {
+      try {
+        await this.invite.onInviteeActivated(userId);
+      } catch {
+        /* ignore */
+      }
+    }
+    return result;
   }
 
-  /** 订单状态查询（轮询兜底）。 */
   async getOrder(orderNo: string, userId: string) {
     const order = await this.orders.findOne({ where: { id: orderNo } });
     if (!order) throw new NotFoundException('order not found');
@@ -163,10 +297,11 @@ export class MembershipService {
       paidAt: order.paidAt ?? null,
       planCode: order.planCode ?? null,
       amountCent: order.amountCent,
+      periodDays: order.periodDays ?? null,
+      autoRenew: order.autoRenew,
     };
   }
 
-  /** 取消未支付订单。 */
   async cancelOrder(orderNo: string, userId: string) {
     return this.dataSource.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
@@ -186,7 +321,6 @@ export class MembershipService {
     });
   }
 
-  /** 开关自动续费。 */
   async setRenewal(userId: string, dto: SetRenewalDto) {
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('user not found');
@@ -195,7 +329,6 @@ export class MembershipService {
     return { autoRenew: user.autoRenew };
   }
 
-  /** 申请退款（mock）：置 refunded + 降级 free（配额回退，不删数据）。 */
   async refund(userId: string, dto: RefundDto) {
     return this.dataSource.transaction(async (manager) => {
       let order: Order | null = null;
@@ -209,7 +342,11 @@ export class MembershipService {
           throw new ForbiddenException('order not owned by current user');
       } else {
         order = await manager.findOne(Order, {
-          where: { userId, product: 'pro_monthly', status: 'paid' },
+          where: {
+            userId,
+            status: 'paid',
+            planCode: In(MEMBERSHIP_PLAN_CODES),
+          },
           order: { createdAt: 'DESC' },
         });
         if (!order)
@@ -235,6 +372,4 @@ export class MembershipService {
       return { refundId: order.refundId, status: 'refunded', plan: user.plan };
     });
   }
-
-  // ---- 权益联动已抽为共享服务 MemberBenefitService（见 member-benefit.service.ts） ----
 }
