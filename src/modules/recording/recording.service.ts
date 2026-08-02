@@ -42,12 +42,23 @@ export class RecordingService {
   ) {}
 
   private collectMediaItems(e: SyncEntryDto) {
-    const items: Array<{ url: string; kind: 'photo' | 'voice'; size: number }> =
-      [];
+    const items: Array<{
+      url: string;
+      kind: 'photo' | 'voice';
+      size: number;
+      durationSec?: number | null;
+      sortOrder?: number;
+    }> = [];
     for (const m of e.media ?? []) {
       const kind =
         m.kind === 'image' || m.kind === 'photo' ? 'photo' : 'voice';
-      items.push({ url: m.url, kind, size: m.size ?? 0 });
+      items.push({
+        url: m.url,
+        kind,
+        size: m.size ?? 0,
+        durationSec: m.durationSec,
+        sortOrder: m.sortOrder,
+      });
     }
     if (e.url && e.kind) {
       const kind =
@@ -59,6 +70,15 @@ export class RecordingService {
         url: e.voice.url,
         kind: 'voice',
         size: e.voice.size ?? 0,
+        durationSec: e.voice.durationSec,
+      });
+    }
+    for (const v of e.voices ?? []) {
+      items.push({
+        url: v.url,
+        kind: 'voice',
+        size: v.size ?? 0,
+        durationSec: v.durationSec,
       });
     }
     const seen = new Set<string>();
@@ -68,6 +88,104 @@ export class RecordingService {
       seen.add(k);
       return true;
     });
+  }
+
+  private resolveAmountCent(expense: {
+    amountCent?: number;
+    amount?: number;
+  } | null | undefined) {
+    if (!expense) return undefined;
+    const n = expense.amountCent ?? expense.amount;
+    if (n == null || n < 1) {
+      throw new BadRequestException('expense.amountCent (or amount) must be >= 1');
+    }
+    return n;
+  }
+
+  /** 有 expenses 以数组为准；否则单笔 expense → 单元素数组；都无则 undefined（不改） */
+  private resolveExpenseLines(
+    e: Pick<SyncEntryDto, 'expense' | 'expenses'>,
+  ): Array<{
+    amountCent: number;
+    category: string;
+    currency?: string;
+    note?: string;
+  }> | undefined {
+    if (e.expenses !== undefined) {
+      return e.expenses.map((line) => ({
+        amountCent: this.resolveAmountCent(line)!,
+        category: normalizeExpenseCategory(line.category) ?? line.category,
+        currency: line.currency,
+        note: line.note,
+      }));
+    }
+    if (e.expense) {
+      return [
+        {
+          amountCent: this.resolveAmountCent(e.expense)!,
+          category:
+            normalizeExpenseCategory(e.expense.category) ?? e.expense.category,
+          currency: e.expense.currency,
+          note: e.expense.note,
+        },
+      ];
+    }
+    return undefined;
+  }
+
+  private mapExpenseDto(exp: Expense) {
+    return {
+      id: exp.id,
+      amountCent: exp.amountCent,
+      amount: exp.amountCent,
+      category: normalizeExpenseCategory(exp.category) ?? exp.category,
+      currency: exp.currency ?? 'CNY',
+      note: exp.note ?? null,
+      sortOrder: exp.sortOrder ?? 0,
+    };
+  }
+
+  private expensesOf(e: Entry): Expense[] {
+    const list = (e.expenses ?? []).slice();
+    list.sort(
+      (a, b) =>
+        (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+    return list;
+  }
+
+  private async replaceExpenses(
+    manager: EntityManager,
+    entryId: string,
+    lines: Array<{
+      amountCent: number;
+      category: string;
+      currency?: string;
+      note?: string;
+    }>,
+  ) {
+    await manager
+      .createQueryBuilder()
+      .delete()
+      .from(Expense)
+      .where('entryId = :entryId', { entryId })
+      .execute();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      await manager.query(
+        `INSERT INTO expenses (id, entryId, amountCent, currency, category, note, sortOrder, createdAt)
+         VALUES (UUID(), ?, ?, ?, ?, ?, ?, NOW(6))`,
+        [
+          entryId,
+          line.amountCent,
+          line.currency ?? 'CNY',
+          line.category,
+          line.note ?? null,
+          i,
+        ],
+      );
+    }
   }
 
   private async assertContentSafe(content?: string) {
@@ -81,15 +199,6 @@ export class RecordingService {
     }
   }
 
-  private resolveAmountCent(expense: SyncEntryDto['expense']) {
-    if (!expense) return undefined;
-    const n = expense.amountCent ?? expense.amount;
-    if (n == null || n < 1) {
-      throw new BadRequestException('expense.amountCent (or amount) must be >= 1');
-    }
-    return n;
-  }
-
   async sync(userId: string, journeyId: string, dtos: SyncEntryDto[]) {
     const journey = await this.journeys.findOne({
       where: { id: journeyId, userId },
@@ -98,7 +207,7 @@ export class RecordingService {
 
     for (const e of dtos) {
       await this.assertContentSafe(e.content);
-      if (e.expense) this.resolveAmountCent(e.expense);
+      this.resolveExpenseLines(e);
 
       const existing = await this.entries.findOne({
         where: { clientId: e.clientId },
@@ -128,10 +237,16 @@ export class RecordingService {
           where: { clientId: e.clientId },
         });
 
+        const firstVoiceDuration =
+          e.voice?.durationSec ??
+          e.voices?.[0]?.durationSec ??
+          e.media?.find(
+            (m) => m.kind === 'audio' || m.kind === 'voice',
+          )?.durationSec;
         const payload = {
           ...(e.payload as Record<string, unknown> | undefined),
-          ...(e.voice?.durationSec != null
-            ? { durationSec: e.voice.durationSec }
+          ...(firstVoiceDuration != null
+            ? { durationSec: firstVoiceDuration }
             : {}),
         };
 
@@ -202,28 +317,9 @@ export class RecordingService {
       }
     }
 
-    if (e.expense) {
-      const category =
-        normalizeExpenseCategory(e.expense.category) ?? e.expense.category;
-      const amountCent = this.resolveAmountCent(e.expense)!;
-      let exp = await manager.findOne(Expense, { where: { entryId } });
-      if (exp) {
-        exp.amountCent = amountCent;
-        exp.category = category;
-        exp.currency = e.expense.currency ?? exp.currency;
-        exp.note = e.expense.note ?? exp.note;
-        await manager.save(exp);
-      } else {
-        await manager.save(
-          manager.create(Expense, {
-            entryId,
-            amountCent,
-            category,
-            currency: e.expense.currency ?? 'CNY',
-            note: e.expense.note,
-          }),
-        );
-      }
+    const expenseLines = this.resolveExpenseLines(e);
+    if (expenseLines !== undefined) {
+      await this.replaceExpenses(manager, entryId, expenseLines);
     }
 
     const mediaItems = this.collectMediaItems(e);
@@ -235,6 +331,7 @@ export class RecordingService {
         existingMedia.map((m) => `${toLegacyKind(m.kind)}:${m.url}`),
       );
 
+      let autoSort = 0;
       for (const item of mediaItems) {
         const storageKind = normalizeMediaKind(item.kind) ?? 'image';
         const key = `${item.kind}:${item.url}`;
@@ -242,8 +339,11 @@ export class RecordingService {
           (m) =>
             m.url === item.url && toLegacyKind(m.kind) === item.kind,
         );
+        const sortOrder = item.sortOrder ?? autoSort++;
         if (found) {
           found.sizeBytes = item.size ?? sizeNumber(found.sizeBytes);
+          if (item.durationSec != null) found.durationSec = item.durationSec;
+          if (item.sortOrder != null) found.sortOrder = item.sortOrder;
           await manager.save(found);
           continue;
         }
@@ -255,6 +355,8 @@ export class RecordingService {
             url: item.url,
             mime: storageKind === 'image' ? 'image/jpeg' : 'audio/m4a',
             sizeBytes: item.size ?? 0,
+            durationSec: item.durationSec ?? null,
+            sortOrder,
             status: 'active',
             createdBy: userId,
             driver: 'local',
@@ -294,9 +396,11 @@ export class RecordingService {
 
   private toEntryResponse(e: Entry, startDate: string) {
     const media = e.media ?? [];
-    const voiceMedia = media.find(
-      (m) => toLegacyKind(m.kind) === 'voice',
-    );
+    const voiceMedias = media
+      .filter((m) => toLegacyKind(m.kind) === 'voice')
+      .slice()
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    const voiceMedia = voiceMedias[0];
     const photos = media.filter((m) => toLegacyKind(m.kind) === 'photo');
     const durationSec =
       (e.payload as any)?.durationSec ?? voiceMedia?.durationSec ?? undefined;
@@ -324,6 +428,26 @@ export class RecordingService {
         };
       });
 
+    const expenseRows = this.expensesOf(e);
+    const expenses = expenseRows.map((x) => this.mapExpenseDto(x));
+    const expenseCompat = expenses[0]
+      ? {
+          ...expenses[0],
+          // 兼容：单对象金额为合计，category 仍为首笔
+          amountCent: expenses.reduce((s, x) => s + x.amountCent, 0),
+          amount: expenses.reduce((s, x) => s + x.amountCent, 0),
+        }
+      : null;
+
+    const voices = voiceMedias.map((m, i) => ({
+      url: m.url,
+      durationSec:
+        m.durationSec ??
+        (i === 0 ? durationSec ?? null : null),
+      size: sizeNumber(m.sizeBytes),
+      sortOrder: m.sortOrder ?? i,
+    }));
+
     return {
       ...e,
       content: e.content ?? '',
@@ -340,18 +464,10 @@ export class RecordingService {
           }
         : null,
       location: e.location ?? null,
-      expense: e.expense
-        ? {
-            ...e.expense,
-            amountCent: e.expense.amountCent,
-            amount: e.expense.amountCent,
-            category:
-              normalizeExpenseCategory(e.expense.category) ??
-              e.expense.category,
-            note: e.expense.note ?? null,
-          }
-        : null,
+      expenses,
+      expense: expenseCompat,
       media: mediaDto,
+      voices,
       voice: voiceMedia
         ? {
             url: voiceMedia.url,
@@ -364,12 +480,45 @@ export class RecordingService {
 
   /** 模块化 Entry（聚合 / 单查同构） */
   toEntryModule(raw: Record<string, any>) {
+    const voices =
+      raw.voices ??
+      (raw.media ?? [])
+        .filter(
+          (m: any) =>
+            m.kind === 'audio' ||
+            m.legacyKind === 'voice' ||
+            m.kind === 'voice',
+        )
+        .map((m: any) => ({
+          url: m.url,
+          durationSec: m.durationSec ?? null,
+          sortOrder: m.sortOrder ?? 0,
+        }));
     const audio =
       raw.voice ??
       (raw.audioUrl
         ? {
             url: raw.audioUrl,
             durationSec: raw.audioDuration ?? null,
+          }
+        : voices[0]
+          ? {
+              url: voices[0].url,
+              durationSec: voices[0].durationSec ?? null,
+            }
+          : null);
+    const expenses = raw.expenses ?? (raw.expense ? [raw.expense] : []);
+    const expense =
+      raw.expense ??
+      (expenses[0]
+        ? {
+            amountCent: expenses.reduce(
+              (s: number, x: any) => s + Number(x.amountCent ?? 0),
+              0,
+            ),
+            category: expenses[0].category,
+            currency: expenses[0].currency ?? 'CNY',
+            note: expenses[0].note ?? null,
           }
         : null);
     return {
@@ -394,15 +543,24 @@ export class RecordingService {
               name: raw.locationTag.name ?? null,
             }
           : null,
-      expense: raw.expense
+      expenses: expenses.map((x: any) => ({
+        amountCent: x.amountCent,
+        category: x.category,
+        currency: x.currency ?? 'CNY',
+        note: x.note ?? null,
+        sortOrder: x.sortOrder ?? 0,
+        id: x.id,
+      })),
+      expense: expense
         ? {
-            amountCent: raw.expense.amountCent,
-            category: raw.expense.category,
-            currency: raw.expense.currency ?? 'CNY',
-            note: raw.expense.note ?? null,
+            amountCent: expense.amountCent,
+            category: expense.category,
+            currency: expense.currency ?? 'CNY',
+            note: expense.note ?? null,
           }
         : null,
       media: raw.media ?? [],
+      voices,
       audio,
       /** 兼容期；正式客户端请忽略 */
       legacy: {
@@ -424,7 +582,7 @@ export class RecordingService {
     if (!journey) throw new NotFoundException('journey not found');
     const rows = await this.entries.find({
       where: { journeyId },
-      relations: ['location', 'expense'],
+      relations: ['location', 'expenses'],
       order: { createdAt: 'ASC' },
     });
     await this.mediaService.attachToEntries(rows);
@@ -475,6 +633,7 @@ export class RecordingService {
     content?: string | null;
     images?: string[];
     audioUrl?: string | null;
+    audios?: Array<{ url: string }> | null;
     hasExistingPhoto?: boolean;
     hasExistingVoice?: boolean;
     clearingImages?: boolean;
@@ -484,11 +643,15 @@ export class RecordingService {
     const hasImage =
       (opts.images && opts.images.length > 0) ||
       (!opts.clearingImages && opts.hasExistingPhoto && opts.images === undefined);
+    const hasAudiosArray =
+      opts.audios !== undefined && opts.audios !== null && opts.audios.length > 0;
     const hasAudio =
+      hasAudiosArray ||
       Boolean(opts.audioUrl) ||
       (!opts.clearingAudio &&
         opts.hasExistingVoice &&
-        opts.audioUrl === undefined);
+        opts.audioUrl === undefined &&
+        opts.audios === undefined);
     if (!hasText && !hasImage && !hasAudio) {
       throw new BadRequestException({
         code: '40004',
@@ -497,10 +660,58 @@ export class RecordingService {
     }
   }
 
+  private resolvePatchAudios(dto: PatchRecordDto): Array<{
+    url: string;
+    durationSec?: number | null;
+  }> | undefined {
+    if (dto.audios !== undefined) {
+      return dto.audios === null ? [] : dto.audios;
+    }
+    if (dto.voices !== undefined) {
+      return dto.voices === null ? [] : dto.voices;
+    }
+    if (dto.audioUrl !== undefined) {
+      if (dto.audioUrl === null) return [];
+      return [{ url: dto.audioUrl, durationSec: dto.audioDuration }];
+    }
+    return undefined;
+  }
+
+  private resolvePatchExpenseLines(dto: PatchRecordDto): Array<{
+    amountCent: number;
+    category: string;
+    currency?: string;
+    note?: string;
+  }> | undefined {
+    if (dto.expenses !== undefined) {
+      if (dto.expenses === null) return [];
+      return dto.expenses.map((line) => ({
+        amountCent: this.resolvePatchAmountCent(line),
+        category: normalizeExpenseCategory(line.category) ?? line.category,
+        currency: line.currency,
+        note: line.note,
+      }));
+    }
+    if (dto.expense !== undefined) {
+      if (dto.expense === null) return [];
+      return [
+        {
+          amountCent: this.resolvePatchAmountCent(dto.expense),
+          category:
+            normalizeExpenseCategory(dto.expense.category) ??
+            dto.expense.category,
+          currency: dto.expense.currency,
+          note: dto.expense.note,
+        },
+      ];
+    }
+    return undefined;
+  }
+
   async patchRecord(userId: string, recordId: string, dto: PatchRecordDto) {
     const entry = await this.entries.findOne({
       where: { id: recordId },
-      relations: ['location', 'expense'],
+      relations: ['location', 'expenses'],
     });
     if (!entry) {
       throw new NotFoundException({ code: '40401', message: '内容已不存在' });
@@ -515,18 +726,22 @@ export class RecordingService {
     const photos = (entry.media ?? []).filter(
       (m) => toLegacyKind(m.kind) === 'photo',
     );
-    const voice = (entry.media ?? []).find(
+    const voiceList = (entry.media ?? []).filter(
       (m) => toLegacyKind(m.kind) === 'voice',
     );
+    const patchAudios = this.resolvePatchAudios(dto);
+    const clearingAudio =
+      patchAudios !== undefined && patchAudios.length === 0;
 
     this.assertRecordNotEmpty({
       content: dto.content !== undefined ? dto.content : entry.content,
       images: dto.images,
       audioUrl: dto.audioUrl,
+      audios: patchAudios,
       hasExistingPhoto: photos.length > 0,
-      hasExistingVoice: !!voice,
+      hasExistingVoice: voiceList.length > 0,
       clearingImages: dto.images !== undefined && dto.images.length === 0,
-      clearingAudio: dto.audioUrl === null,
+      clearingAudio,
     });
 
     if (dto.images && dto.images.length > 9) {
@@ -541,6 +756,16 @@ export class RecordingService {
         message: '语音时长不能超过 5 分钟',
       });
     }
+    if (patchAudios) {
+      for (const a of patchAudios) {
+        if (a.durationSec != null && a.durationSec > 300) {
+          throw new BadRequestException({
+            code: '40001',
+            message: '语音时长不能超过 5 分钟',
+          });
+        }
+      }
+    }
 
     if (dto.recordedAt !== undefined) {
       const at = new Date(dto.recordedAt);
@@ -550,11 +775,18 @@ export class RecordingService {
     if (dto.dayIndex !== undefined) entry.dayIndex = dto.dayIndex;
     if (dto.content !== undefined) entry.content = dto.content ?? undefined;
 
-    if (dto.audioDuration != null || dto.audioUrl !== undefined) {
+    if (
+      dto.audioDuration != null ||
+      dto.audioUrl !== undefined ||
+      patchAudios !== undefined
+    ) {
+      const firstDur =
+        patchAudios?.[0]?.durationSec ?? dto.audioDuration ?? undefined;
       entry.payload = {
         ...(entry.payload ?? {}),
-        ...(dto.audioDuration != null
-          ? { durationSec: dto.audioDuration }
+        ...(firstDur != null ? { durationSec: firstDur } : {}),
+        ...(patchAudios !== undefined && patchAudios.length === 0
+          ? { durationSec: null }
           : {}),
       };
     }
@@ -564,7 +796,6 @@ export class RecordingService {
         const existingPhotos = await manager.find(Media, {
           where: { ownerType: 'entry', ownerId: entry.id, kind: 'image' },
         });
-        // 兼容旧 photo kind
         const legacyPhotos = await manager.find(Media, {
           where: { ownerType: 'entry', ownerId: entry.id, kind: 'photo' },
         });
@@ -589,7 +820,7 @@ export class RecordingService {
         }
       }
 
-      if (dto.audioUrl !== undefined) {
+      if (patchAudios !== undefined) {
         const existingVoice = await manager.find(Media, {
           where: { ownerType: 'entry', ownerId: entry.id, kind: 'audio' },
         });
@@ -598,16 +829,18 @@ export class RecordingService {
         });
         const toRemove = [...existingVoice, ...legacyVoice];
         if (toRemove.length) await manager.remove(toRemove);
-        if (dto.audioUrl) {
+        for (let i = 0; i < patchAudios.length; i++) {
+          const a = patchAudios[i];
           await manager.save(
             manager.create(Media, {
               ownerType: 'entry',
               ownerId: entry.id,
               kind: 'audio',
-              url: dto.audioUrl,
+              url: a.url,
               mime: 'audio/m4a',
               sizeBytes: 0,
-              durationSec: dto.audioDuration ?? null,
+              durationSec: a.durationSec ?? null,
+              sortOrder: i,
               status: 'active',
               createdBy: userId,
               driver: 'local',
@@ -641,64 +874,45 @@ export class RecordingService {
         }
       }
 
-      if (dto.expense !== undefined) {
-        let exp = await manager.findOne(Expense, {
-          where: { entryId: entry.id },
-        });
-        if (dto.expense === null) {
-          if (exp) await manager.remove(exp);
-        } else {
-          const amountCent = this.resolvePatchAmountCent(dto.expense);
-          const category =
-            normalizeExpenseCategory(dto.expense.category) ??
-            dto.expense.category;
-          if (exp) {
-            exp.amountCent = amountCent;
-            exp.category = category;
-            exp.note = dto.expense.note ?? exp.note;
-            if (dto.expense.currency) exp.currency = dto.expense.currency;
-            await manager.save(exp);
-          } else {
-            await manager.save(
-              manager.create(Expense, {
-                entryId: entry.id,
-                amountCent,
-                category,
-                currency: dto.expense.currency ?? 'CNY',
-                note: dto.expense.note,
-              }),
-            );
-          }
-        }
+      const expenseLines = this.resolvePatchExpenseLines(dto);
+      if (expenseLines !== undefined) {
+        await this.replaceExpenses(manager, entry.id, expenseLines);
       }
+
+      const nextExpenses =
+        expenseLines !== undefined
+          ? expenseLines
+          : this.expensesOf(entry).map((x) => ({
+              amountCent: x.amountCent,
+              category: x.category,
+            }));
 
       entry.type = inferRecordType({
         content: entry.content,
         media: [
           ...(dto.images ?? photos.map(() => ({ kind: 'photo' as const }))).map(
-            (u) =>
-              typeof u === 'string'
-                ? { kind: 'photo' as const }
-                : { kind: 'photo' as const },
+            () => ({ kind: 'photo' as const }),
           ),
-          ...(dto.audioUrl || voice
-            ? [{ kind: 'voice' as const }]
-            : []),
+          ...(patchAudios !== undefined
+            ? patchAudios.map(() => ({ kind: 'voice' as const }))
+            : voiceList.map(() => ({ kind: 'voice' as const }))),
         ],
         location:
           dto.locationTag === null
             ? undefined
             : dto.locationTag ?? entry.location,
-        expense:
-          dto.expense === null ? undefined : dto.expense ?? entry.expense,
+        expenses: nextExpenses,
+        expense: nextExpenses[0],
       });
       entry.syncVersion += 1;
+      // 避免级联把内存中旧 expenses 再写回（entryId 被置空）
+      entry.expenses = undefined;
       await manager.save(entry);
     });
 
     const fresh = await this.entries.findOne({
       where: { id: entry.id },
-      relations: ['location', 'expense'],
+      relations: ['location', 'expenses'],
     });
     await this.mediaService.attachToEntries([fresh!]);
     return this.toEntryResponse(fresh!, journey.startDate);

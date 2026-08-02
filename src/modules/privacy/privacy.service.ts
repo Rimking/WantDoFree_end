@@ -34,7 +34,7 @@ export class PrivacyService {
     for (const j of journeys) {
       const entries = await this.entries.find({
         where: { journeyId: j.id },
-        relations: ['location', 'expense'],
+        relations: ['location', 'expenses'],
         order: { createdAt: 'ASC' },
       });
       await this.mediaService.attachToEntries(entries);
@@ -54,34 +54,46 @@ export class PrivacyService {
           createdAt: j.createdAt,
           updatedAt: j.updatedAt,
         },
-        entries: entries.map((e) => ({
-          id: e.id,
-          type: e.type,
-          content: e.content,
-          clientId: e.clientId,
-          syncVersion: e.syncVersion,
-          payload: e.payload,
-          createdAt: e.createdAt,
-          location: e.location
-            ? {
-                lat: e.location.lat,
-                lng: e.location.lng,
-                name: e.location.name,
-              }
-            : null,
-          expense: e.expense
-            ? {
-                amountCent: e.expense.amountCent,
-                category: e.expense.category,
-                currency: e.expense.currency,
-              }
-            : null,
-          media: (e.media ?? []).map((m) => ({
-            kind: m.kind,
-            url: m.url,
-            sizeBytes: sizeNumber(m.sizeBytes),
-          })),
-        })),
+        entries: entries.map((e) => {
+          const expenses = (e.expenses ?? []).map((exp) => ({
+            amountCent: exp.amountCent,
+            category: exp.category,
+            currency: exp.currency,
+            note: exp.note ?? null,
+            sortOrder: exp.sortOrder ?? 0,
+          }));
+          return {
+            id: e.id,
+            type: e.type,
+            content: e.content,
+            clientId: e.clientId,
+            syncVersion: e.syncVersion,
+            payload: e.payload,
+            createdAt: e.createdAt,
+            location: e.location
+              ? {
+                  lat: e.location.lat,
+                  lng: e.location.lng,
+                  name: e.location.name,
+                }
+              : null,
+            expenses,
+            expense: expenses[0]
+              ? {
+                  amountCent: expenses.reduce((s, x) => s + x.amountCent, 0),
+                  category: expenses[0].category,
+                  currency: expenses[0].currency,
+                }
+              : null,
+            media: (e.media ?? []).map((m) => ({
+              kind: m.kind,
+              url: m.url,
+              sizeBytes: sizeNumber(m.sizeBytes),
+              durationSec: m.durationSec ?? null,
+              sortOrder: m.sortOrder ?? 0,
+            })),
+          };
+        }),
       });
     }
 

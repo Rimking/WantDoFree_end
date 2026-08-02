@@ -7,6 +7,7 @@ import {
   Index,
   ManyToOne,
   OneToOne,
+  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { Journey } from './journey.entity';
@@ -71,6 +72,7 @@ export class Entry {
   @OneToOne(() => Location, (l) => l.entry, { cascade: true })
   location?: Location;
 
-  @OneToOne(() => Expense, (e) => e.entry, { cascade: true })
-  expense?: Expense;
+  /** 一条记录可挂多笔花费 */
+  @OneToMany(() => Expense, (e) => e.entry)
+  expenses?: Expense[];
 }

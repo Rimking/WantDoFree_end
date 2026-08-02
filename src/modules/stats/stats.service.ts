@@ -361,6 +361,8 @@ export class StatsService {
       return this.ok(
         {
           total: 0,
+          totalCent: 0,
+          count: 0,
           currency: 'CNY',
           byCategory: [],
           trend: [],
@@ -384,6 +386,7 @@ export class StatsService {
     const byCatRaw = await base()
       .select('x.category', 'category')
       .addSelect('SUM(x.amountCent)', 'amountCent')
+      .addSelect('COUNT(*)', 'cnt')
       .groupBy('x.category')
       .getRawMany();
 
@@ -398,11 +401,13 @@ export class StatsService {
       .select('j.id', 'journeyId')
       .addSelect('j.title', 'name')
       .addSelect('SUM(x.amountCent)', 'amountCent')
+      .addSelect('COUNT(*)', 'cnt')
       .groupBy('j.id')
       .addGroupBy('j.title')
       .getRawMany();
 
     const totalCent = byCatRaw.reduce((s, r) => s + Number(r.amountCent), 0);
+    const count = byCatRaw.reduce((s, r) => s + Number(r.cnt), 0);
 
     const byCategory = byCatRaw.map((r) => {
       const amountCent = Number(r.amountCent);
@@ -413,6 +418,7 @@ export class StatsService {
         category,
         amountCent,
         amount: amountCent,
+        count: Number(r.cnt),
         ratio: totalCent ? Number((amountCent / totalCent).toFixed(4)) : 0,
       };
     });
@@ -421,6 +427,7 @@ export class StatsService {
       {
         totalCent,
         total: totalCent,
+        count,
         currency: 'CNY',
         byCategory,
         trend: trendRaw.map((r) => {
@@ -438,7 +445,7 @@ export class StatsService {
             name: r.name,
             amountCent,
             amount: amountCent,
-            ratio: totalCent ? Number((amountCent / totalCent).toFixed(4)) : 0,
+            count: Number(r.cnt),
           };
         }),
       },

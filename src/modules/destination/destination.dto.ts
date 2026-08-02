@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -166,4 +167,39 @@ export class DestinationIdBodyDto {
   @MinLength(1)
   @MaxLength(64)
   id: string;
+}
+
+/**
+ * 地图连点：跨旅程聚合计划选点。
+ * userId 来自 JWT，勿传。
+ * 时间过滤：旅程与 [startDate, endDate] 有交集（startDate<=journey.end 且 endDate>=journey.start）。
+ */
+export class DestinationMapListBodyDto {
+  /** YYYY-MM-DD；与 endDate 成对出现，可都不传表示全部旅程 */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  startDate?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  endDate?: string;
+
+  /** 可选：只查某一个计划/旅程 */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  journeyId?: string;
+
+  /** 兼容别名：planId === journeyId */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  planId?: string;
+
+  /** 默认 true：仅返回有经纬度的点（便于折线）；false 返回全部选点 */
+  @IsOptional()
+  @IsBoolean()
+  onlyWithCoords?: boolean;
 }

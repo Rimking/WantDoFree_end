@@ -1010,7 +1010,7 @@ async function seedGuidesFromDb(ctx: Ctx) {
     const journey = await ctx.journeys.findOneByOrFail({ id: journeyId });
     const entries = await ctx.entries.find({
       where: { journeyId },
-      relations: ['location', 'expense'],
+      relations: ['location', 'expenses'],
       order: { createdAt: 'ASC' },
     });
     const mediaRows = entries.length
@@ -1104,11 +1104,12 @@ function buildGuidePayload(journey: Journey, entries: Entry[]) {
   const categoryMap = new Map<string, number>();
   let totalCent = 0;
   for (const e of entries) {
-    if (!e.expense) continue;
-    totalCent += e.expense.amountCent;
-    const cat =
-      normalizeExpenseCategory(e.expense.category) ?? e.expense.category;
-    categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + e.expense.amountCent);
+    for (const exp of e.expenses ?? []) {
+      totalCent += exp.amountCent;
+      const cat =
+        normalizeExpenseCategory(exp.category) ?? exp.category;
+      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + exp.amountCent);
+    }
   }
   const byCategory = [...categoryMap.entries()].map(([category, amountCent]) => ({
     category,

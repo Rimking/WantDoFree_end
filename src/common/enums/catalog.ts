@@ -172,7 +172,10 @@ export function inferRecordType(input: {
   kind?: string;
   location?: unknown;
   expense?: unknown;
+  expenses?: unknown[] | null;
   voice?: unknown;
+  voices?: unknown[] | null;
+  audios?: unknown[] | null;
 }): EntryType {
   if (input.type && (ENTRY_TYPES as readonly string[]).includes(input.type)) {
     return input.type as EntryType;
@@ -192,9 +195,13 @@ export function inferRecordType(input: {
     input.kind === 'voice' ||
     input.kind === 'audio' ||
     Boolean(input.voice) ||
+    Boolean(input.voices?.length) ||
+    Boolean(input.audios?.length) ||
     Boolean(input.url && (input.kind === 'voice' || input.kind === 'audio'));
   const hasLoc = Boolean(input.location);
-  const hasExp = Boolean(input.expense);
+  const hasExp =
+    Boolean(input.expense) ||
+    Boolean(input.expenses && input.expenses.length > 0);
   const hasText = Boolean(input.content?.trim());
 
   if (hasPhoto) return 'photo';

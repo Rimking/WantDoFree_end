@@ -40,6 +40,7 @@ type GuidePayload = {
       category: string;
       amountCent: number;
       ratio: number;
+      count?: number;
     }>;
   };
   meta: {
@@ -359,7 +360,7 @@ export class GuideService {
   ): Promise<GuidePayload> {
     const entries = await this.entries.find({
       where: { journeyId: journey.id },
-      relations: ['location', 'expense'],
+      relations: ['location', 'expenses'],
       order: { createdAt: 'ASC' },
     });
     await this.mediaService.attachToEntries(entries);
@@ -418,19 +419,23 @@ export class GuideService {
     const cities = [...new Set(route)];
 
     const categoryMap = new Map<string, number>();
+    const categoryCount = new Map<string, number>();
     let totalCent = 0;
     for (const e of entries) {
-      if (!e.expense) continue;
-      totalCent += e.expense.amountCent;
-      const cat =
-        normalizeExpenseCategory(e.expense.category) ?? e.expense.category;
-      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + e.expense.amountCent);
+      for (const exp of e.expenses ?? []) {
+        totalCent += exp.amountCent;
+        const cat =
+          normalizeExpenseCategory(exp.category) ?? exp.category;
+        categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + exp.amountCent);
+        categoryCount.set(cat, (categoryCount.get(cat) ?? 0) + 1);
+      }
     }
     const byCategory = [...categoryMap.entries()].map(
       ([category, amountCent]) => ({
         category,
         amountCent,
         ratio: totalCent ? Number((amountCent / totalCent).toFixed(4)) : 0,
+        count: categoryCount.get(category) ?? 0,
       }),
     );
 

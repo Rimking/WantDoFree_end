@@ -17,6 +17,7 @@ import {
   DestinationCreateBodyDto,
   DestinationIdBodyDto,
   DestinationJourneyIdBodyDto,
+  DestinationMapListBodyDto,
   DestinationReorderBodyDto,
   DestinationUpdateBodyDto,
   PatchDestinationDto,
@@ -36,6 +37,15 @@ export class DestinationJourneyController {
     @Body() body: DestinationJourneyIdBodyDto,
   ) {
     return this.destination.list(u.id, body.journeyId);
+  }
+
+  /** 地图页：按时间范围聚合各计划选点（连线用） */
+  @Post('destinations/mapList')
+  mapListPost(
+    @CurrentUser() u: { id: string },
+    @Body() body: DestinationMapListBodyDto,
+  ) {
+    return this.destination.mapList(u.id, body);
   }
 
   @Post('destinations/create')

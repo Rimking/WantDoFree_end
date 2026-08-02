@@ -52,6 +52,14 @@ export class SyncMediaItemDto {
   @IsEnum(['photo', 'voice', 'image', 'audio'])
   kind: 'photo' | 'voice' | 'image' | 'audio';
   @IsOptional() @IsInt() @Min(0) size?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(300) durationSec?: number;
+  @IsOptional() @IsInt() @Min(0) sortOrder?: number;
+}
+
+export class SyncVoiceClipDto {
+  @IsUrl({ require_tld: false }) url: string;
+  @IsOptional() @IsInt() @Min(0) @Max(300) durationSec?: number;
+  @IsOptional() @IsInt() @Min(0) size?: number;
 }
 
 export class SyncEntryDto {
@@ -68,10 +76,19 @@ export class SyncEntryDto {
   @Type(() => SyncLocationDto)
   location?: SyncLocationDto;
 
+  /** 单笔兼容；有 expenses 时以数组为准 */
   @IsOptional()
   @ValidateNested()
   @Type(() => SyncExpenseDto)
   expense?: SyncExpenseDto;
+
+  /** 多笔花费（推荐） */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => SyncExpenseDto)
+  expenses?: SyncExpenseDto[];
 
   @IsOptional()
   @IsArray()
@@ -88,8 +105,17 @@ export class SyncEntryDto {
   kind?: 'photo' | 'voice' | 'image' | 'audio';
   @IsOptional() @IsInt() @Min(0) size?: number;
 
+  /** 首段语音兼容 */
   @IsOptional()
   voice?: { url?: string; durationSec?: number; size?: number };
+
+  /** 多段语音（会并入 media audio） */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => SyncVoiceClipDto)
+  voices?: SyncVoiceClipDto[];
 }
 
 export class SyncBatchDto {
@@ -125,6 +151,11 @@ export class RecordExpenseDto {
   @IsOptional() @IsString() @MaxLength(8) currency?: string;
 }
 
+export class RecordAudioDto {
+  @IsUrl({ require_tld: false }) url: string;
+  @IsOptional() @IsInt() @Min(0) @Max(300) durationSec?: number;
+}
+
 export class PatchRecordDto {
   @IsOptional() @IsDateString() recordedAt?: string;
 
@@ -145,6 +176,7 @@ export class PatchRecordDto {
   @IsUrl({ require_tld: false }, { each: true })
   images?: string[];
 
+  /** 单段兼容；有 audios/voices 时以数组为准 */
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @IsUrl({ require_tld: false })
@@ -157,17 +189,48 @@ export class PatchRecordDto {
   @Max(300)
   audioDuration?: number | null;
 
+  /**
+   * 多段语音覆盖写：传入则替换该 entry 全部 audio（空数组/null 清空）。
+   * 与 images 互不干扰。
+   */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => RecordAudioDto)
+  audios?: RecordAudioDto[] | null;
+
+  /** audios 别名 */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => RecordAudioDto)
+  voices?: RecordAudioDto[] | null;
+
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @ValidateNested()
   @Type(() => RecordLocationTagDto)
   locationTag?: RecordLocationTagDto | null;
 
+  /** 单笔兼容；有 expenses 时以数组为准；null 清空全部 */
   @IsOptional()
   @ValidateIf((_, v) => v !== null)
   @ValidateNested()
   @Type(() => RecordExpenseDto)
   expense?: RecordExpenseDto | null;
+
+  /** 多笔花费覆盖写：空数组/null 清空 */
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => RecordExpenseDto)
+  expenses?: RecordExpenseDto[] | null;
 }
 
 export class PatchRecordTimeDto {
