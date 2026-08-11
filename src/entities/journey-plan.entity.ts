@@ -9,21 +9,26 @@ import {
 } from 'typeorm';
 import { Journey } from './journey.entity';
 
+export type PlanPlaceIntent = 'wish' | 'planned' | 'must';
+
 export type PlanPlace = {
   clientId: string;
   name: string;
   note?: string;
   coverUrl?: string;
-  /** 纬度（计划地图打点） */
+  /** 纬度（计划地图打点）；可空——允许仅填名称保存 */
   lat?: number | null;
   /** 经度 */
   lng?: number | null;
   /** 地址/位置文案 */
   locationName?: string | null;
-  /** 分类：SIGHT/FOOD/STAY/SHOPPING/OTHER 或小写 */
+  /** 分类：SIGHT/FOOD/STAY/SHOPPING/OTHER */
   category?: string | null;
   dayIndex?: number | null;
+  /** 想去 / 已定 / 必去 */
+  intent?: PlanPlaceIntent | null;
   images?: string[];
+  sortOrder?: number;
 };
 
 export type PlanCheck = {

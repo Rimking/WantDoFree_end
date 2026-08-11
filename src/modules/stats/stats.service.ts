@@ -334,6 +334,8 @@ export class StatsService {
       totalDays,
       totalExpense,
       totalPlaces: places.length,
+      /** 足迹城市数：自由打卡 location.name 去重（非 journey.destination） */
+      footprintCities: places.length,
       streakDays,
       insight,
     };

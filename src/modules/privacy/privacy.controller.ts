@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { PrivacyService } from './privacy.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -12,5 +12,12 @@ export class PrivacyController {
   @Get('export')
   export(@CurrentUser() u: { id: string }) {
     return this.privacy.exportAll(u.id);
+  }
+
+  /** 账号注销（软删） */
+  @Post('delete')
+  @HttpCode(200)
+  deleteAccount(@CurrentUser() u: { id: string }) {
+    return this.privacy.deleteAccount(u.id);
   }
 }

@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { In, IsNull, Like, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { JwtService } from '@nestjs/jwt';
@@ -485,11 +485,21 @@ export class MediaService {
   }
 
   async findOwnedFile(userId: string, storageKey: string) {
-    return this.media.findOne({
+    const byKey = await this.media.findOne({
       where: {
         storageKey,
         createdBy: userId,
         deletedAt: IsNull(),
+      },
+    });
+    if (byKey) return byKey;
+    // 兼容 /records/update 按 URL 重建时未写 storageKey 的脏行
+    const needle = storageKey.replace(/\\/g, '/');
+    return this.media.findOne({
+      where: {
+        createdBy: userId,
+        deletedAt: IsNull(),
+        url: Like(`%/${needle}`),
       },
     });
   }

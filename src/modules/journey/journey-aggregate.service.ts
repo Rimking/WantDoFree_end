@@ -27,22 +27,22 @@ export class JourneyAggregateService {
     private readonly guide: GuideService,
   ) {}
 
-  /** 列表：模块化项 + 分页 */
+  /** 列表：扁平卡片项 + 分页（type/keyword/时间区间筛选） */
   async listModular(userId: string, body: JourneyListBodyDto) {
     const page = body.page ?? 1;
     const pageSize = body.pageSize ?? 20;
-    const all = await this.journey.list(
-      userId,
-      body.status,
-      body.displayStatus,
-    );
+    const all = await this.journey.listFiltered(userId, {
+      status: body.status,
+      displayStatus: body.displayStatus,
+      type: body.type,
+      keyword: body.keyword,
+      startTime: body.startTime,
+      endTime: body.endTime,
+    });
     const total = all.length;
     const slice = all.slice((page - 1) * pageSize, page * pageSize);
-    const useFlat = body.modular === false;
     return {
-      list: useFlat
-        ? slice
-        : slice.map((item) => this.journey.toModularListItem(item)),
+      list: slice.map((item) => this.journey.toListCardItem(item)),
       total,
       page,
       pageSize,
@@ -62,11 +62,13 @@ export class JourneyAggregateService {
     const journey = this.journey.toJourneyModule(flat);
     const journeyStats = this.journey.toJourneyStatsModule(flat);
     const planProgress = this.journey.toPlanProgressModule(flat);
+    const handbook = this.journey.toHandbookModule(flat);
 
     const out: Record<string, unknown> = {
       journey,
       journeyStats,
       planProgress,
+      handbook,
     };
 
     if (set.has('plan')) {
@@ -97,6 +99,7 @@ export class JourneyAggregateService {
       journey: this.journey.toJourneyModule(flat),
       journeyStats: this.journey.toJourneyStatsModule(flat),
       planProgress: this.journey.toPlanProgressModule(flat),
+      handbook: this.journey.toHandbookModule(flat),
     };
   }
 }

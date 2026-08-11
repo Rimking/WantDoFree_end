@@ -3,6 +3,7 @@ import {
   NotFoundException,
   GoneException,
   InternalServerErrorException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,8 +15,11 @@ import { Guide } from '../../entities/guide.entity';
 import { User } from '../../entities/user.entity';
 import { ShareEvent } from '../../entities/share-event.entity';
 import { normalizeThemeTag, themeLabelOf } from '../../common/enums/catalog';
-
+import { normalizeGuideTemplateId } from '../../common/handbook';
 import { MemberBenefitService } from '../membership/member-benefit.service';
+import { WechatService } from '../../infrastructure/wechat/wechat.service';
+import { LocalStorageDriver } from '../../infrastructure/storage/local-storage.driver';
+import { CreateWxaCodeDto, ExportPosterDto } from './share.dto';
 
 type GuidePayloadLite = {
   highlights?: Array<{
@@ -42,6 +46,8 @@ export class ShareService {
     private readonly shareEvents: Repository<ShareEvent>,
     private readonly config: ConfigService,
     private readonly benefit: MemberBenefitService,
+    private readonly wechat: WechatService,
+    private readonly local: LocalStorageDriver,
   ) {}
 
   /** 生成全局唯一短码（base64url，12 位）。 */
@@ -311,6 +317,109 @@ export class ShareService {
       broughtRegistrations: uniqueViewers,
       proConversions,
       shares,
+    };
+  }
+
+  /**
+   * 登记客户端出图结果（Canvas → media 上传后回传 URL）。
+   * 服务端暂不做像素渲染；返回可分享的 imageUrl + 策略。
+   */
+  async exportPoster(userId: string, dto: ExportPosterDto) {
+    const journey = await this.journeys.findOne({
+      where: { id: dto.journeyId, userId },
+    });
+    if (!journey) throw new NotFoundException('journey not found');
+    const templateId = normalizeGuideTemplateId(dto.templateId);
+    const user = await this.users.findOne({ where: { id: userId } });
+    const exportPolicy = user
+      ? this.benefit.exportPolicyOf(user)
+      : {
+          watermark: true,
+          watermarkText: '渡清川·免费版',
+          maxResolution: 720 as const,
+        };
+
+    let token = dto.shareToken ?? null;
+    if (token) {
+      const s = await this.shares.findOne({
+        where: { token, sharerId: userId },
+      });
+      if (!s) throw new NotFoundException('share token not found');
+    }
+
+    return {
+      ok: true,
+      mode: 'client_render' as const,
+      journeyId: journey.id,
+      templateId,
+      imageUrl: dto.imageUrl,
+      shareToken: token,
+      exportPolicy,
+      note: '海报由客户端按 templateId 渲染后上传；本接口登记 URL 供分享通道使用',
+    };
+  }
+
+  /** 生成带 journey/shareToken 的小程序码，落本地 files。 */
+  async createWxaCode(userId: string, dto: CreateWxaCodeDto) {
+    if (!dto.journeyId && !dto.shareToken) {
+      throw new BadRequestException({
+        code: '40001',
+        message: 'journeyId 或 shareToken 至少传一个',
+      });
+    }
+
+    let journeyId = dto.journeyId;
+    let token = dto.shareToken;
+    if (token) {
+      const share = await this.shares.findOne({
+        where: { token, sharerId: userId },
+      });
+      if (!share) throw new NotFoundException('share not found');
+      journeyId = share.journeyId;
+    } else if (journeyId) {
+      const j = await this.journeys.findOne({
+        where: { id: journeyId, userId },
+      });
+      if (!j) throw new NotFoundException('journey not found');
+    }
+
+    const scene = (token || `j=${String(journeyId).replace(/-/g, '').slice(0, 30)}`).slice(
+      0,
+      32,
+    );
+    const page = dto.page || 'pages/ShareView/ShareView';
+
+    let buffer: Buffer;
+    let mock = false;
+    const wx = await this.wechat.getUnlimitedWxaCode({ scene, page });
+    if (wx) {
+      buffer = wx.buffer;
+      mock = wx.mock;
+    } else {
+      // 开发占位：1x1 PNG
+      mock = true;
+      buffer = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      );
+    }
+
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const key = `${y}/${m}/${d}/wxacode-${scene.replace(/[^a-zA-Z0-9_-]/g, '')}.png`;
+    await this.local.writeFile(key, buffer);
+    const imageUrl = this.local.resolveUrl(key);
+
+    return {
+      ok: true,
+      mock,
+      scene,
+      page,
+      journeyId: journeyId ?? null,
+      shareToken: token ?? null,
+      imageUrl,
     };
   }
 }

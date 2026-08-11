@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -21,6 +22,7 @@ import {
   UpsertPlanDto,
 } from './journey.dto';
 import {
+  HandbookListBodyDto,
   JourneyDetailBodyDto,
   JourneyIdBodyDto,
   JourneyListBodyDto,
@@ -65,6 +67,15 @@ export class JourneyController {
     return this.aggregate.listModular(u.id, body);
   }
 
+  /** 游记工作台：带四态聚合，避免前端 N+1 */
+  @Post('handbook/list')
+  handbookList(
+    @CurrentUser() u: { id: string },
+    @Body() body: HandbookListBodyDto,
+  ) {
+    return this.journey.handbookList(u.id, { phase: body.phase });
+  }
+
   @Post('get')
   getPost(
     @CurrentUser() u: { id: string },
@@ -73,13 +84,17 @@ export class JourneyController {
     return this.aggregate.getModular(u.id, body.id);
   }
 
-  /** P0 详情聚合 */
+  /** P0 详情聚合（始终含 handbook；include 可含 handbook） */
   @Post('detail')
   detailPost(
     @CurrentUser() u: { id: string },
     @Body() body: JourneyDetailBodyDto,
   ) {
-    return this.aggregate.detail(u.id, body.journeyId, body.include);
+    const journeyId = body.journeyId ?? body.id;
+    if (!journeyId) {
+      throw new BadRequestException('journeyId or id is required');
+    }
+    return this.aggregate.detail(u.id, journeyId, body.include);
   }
 
   @Post('update')
@@ -140,6 +155,10 @@ export class JourneyController {
       .then((p) => this.journey.toPlanModule(p));
   }
 
+  /**
+   * @deprecated 勿用于准备事项进度；真源为 /checklist/toggle。
+   * 仅兼容旧客户端写 plan.checks。
+   */
   @Post('plan/toggleCheck')
   planToggle(
     @CurrentUser() u: { id: string },

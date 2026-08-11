@@ -8,11 +8,15 @@ import { ShareEvent } from '../../entities/share-event.entity';
 import { ShareService } from './share.service';
 import { ShareController } from './share.controller';
 import { MemberBenefitModule } from '../membership/member-benefit.module';
+import { WechatModule } from '../../infrastructure/wechat/wechat.module';
+import { StorageModule } from '../../infrastructure/storage/storage.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Share, Journey, Guide, User, ShareEvent]),
     MemberBenefitModule,
+    WechatModule,
+    StorageModule,
   ],
   controllers: [ShareController],
   providers: [ShareService],

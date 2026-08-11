@@ -107,6 +107,11 @@ const svc = new ShareService(
   shareEventRepo as unknown as Repository<ShareEvent>,
   { get: () => undefined } as unknown as any,
   new MemberBenefitService(),
+  { getUnlimitedWxaCode: async () => null } as unknown as any,
+  {
+    writeFile: async () => undefined,
+    resolveUrl: (k: string) => `/dream/v1/files/${k}`,
+  } as unknown as any,
 );
 
 console.log('T4.7 逻辑自测 · ShareService 分享全链路');

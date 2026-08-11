@@ -23,6 +23,7 @@ export const JOURNEY_DETAIL_INCLUDES = [
   'plan',
   'expense',
   'guide',
+  'handbook',
 ] as const;
 
 export type JourneyDetailInclude = (typeof JOURNEY_DETAIL_INCLUDES)[number];
@@ -36,13 +37,46 @@ const toBool = ({ value }: { value: unknown }) => {
 };
 
 export class JourneyListBodyDto {
+  /** @deprecated 优先用 type；持久化三态 planned|ongoing|finished */
   @IsOptional()
   @IsString()
   status?: string;
 
+  /** @deprecated 优先用 type；展示态 planning|departing|ongoing|finished */
   @IsOptional()
   @IsString()
   displayStatus?: string;
+
+  /**
+   * 首页卡片类型（展示态）：
+   * 不传=全部；1=进行中；2=即将出发；3=规划中；4=已完成
+   */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : value;
+  })
+  @IsIn([1, 2, 3, 4])
+  type?: 1 | 2 | 3 | 4;
+
+  /** 关键词：仅匹配计划名称（journey.title） */
+  @IsOptional()
+  @IsString()
+  @Length(0, 64)
+  keyword?: string;
+
+  /** 行程时间区间起（字符串，建议 YYYY-MM-DD；与旅程起止日有交集则命中） */
+  @IsOptional()
+  @IsString()
+  @Length(1, 32)
+  startTime?: string;
+
+  /** 行程时间区间止（字符串，建议 YYYY-MM-DD） */
+  @IsOptional()
+  @IsString()
+  @Length(1, 32)
+  endTime?: string;
 
   @IsOptional()
   @IsInt()
@@ -55,11 +89,13 @@ export class JourneyListBodyDto {
   @Max(100)
   pageSize?: number = 20;
 
-  /** true=模块化列表项（默认）；false=旧平铺兼容 */
+  /**
+   * @deprecated 列表已固定返回扁平卡片对象，传此字段无效（可省略）
+   */
   @IsOptional()
   @Transform(toBool)
   @IsBoolean()
-  modular?: boolean = true;
+  modular?: boolean;
 }
 
 export class JourneyIdBodyDto {
@@ -69,9 +105,17 @@ export class JourneyIdBodyDto {
 }
 
 export class JourneyDetailBodyDto {
+  /** 与 id 二选一 */
+  @IsOptional()
   @IsString()
   @Length(1, 64)
-  journeyId: string;
+  journeyId?: string;
+
+  /** 兼容前端传 id */
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  id?: string;
 
   @IsOptional()
   @IsArray()
@@ -129,6 +173,15 @@ export class EntriesListBodyDto {
   modular?: boolean = true;
 }
 
+/** 首页最近记录（跨旅程，最多 10） */
+export class EntriesRecentBodyDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  limit?: number = 10;
+}
+
 export class EntriesSyncBodyDto {
   @IsString()
   @Length(1, 64)
@@ -183,9 +236,26 @@ export class GuideCreateBodyDto {
   @Length(1, 64)
   journeyId: string;
 
+  /** 兼容旧字段；与 templateId 二选一，优先 templateId */
   @IsOptional()
   @IsString()
   template?: string;
+
+  /** 游记模版：basic | T1–T6 */
+  @IsOptional()
+  @IsString()
+  templateId?: string;
+
+  /** true=强制重生成（覆盖已有 Guide） */
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
+}
+
+export class HandbookListBodyDto {
+  @IsOptional()
+  @IsString()
+  phase?: string;
 }
 
 export class GuideFavoriteBodyDto {

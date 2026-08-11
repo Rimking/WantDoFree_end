@@ -7,6 +7,9 @@ import { Entry } from '../../entities/entry.entity';
 import { Location } from '../../entities/location.entity';
 import { Destination } from '../../entities/destination.entity';
 import { ChecklistItem } from '../../entities/checklist-item.entity';
+import { Guide } from '../../entities/guide.entity';
+import { Share } from '../../entities/share.entity';
+import { ShareEvent } from '../../entities/share-event.entity';
 import { JourneyService } from './journey.service';
 import { JourneyAggregateService } from './journey-aggregate.service';
 import { JourneyController } from './journey.controller';
@@ -25,6 +28,9 @@ import { GuideModule } from '../guide/guide.module';
       Location,
       Destination,
       ChecklistItem,
+      Guide,
+      Share,
+      ShareEvent,
     ]),
     ChecklistModule,
     forwardRef(() => RecordingModule),

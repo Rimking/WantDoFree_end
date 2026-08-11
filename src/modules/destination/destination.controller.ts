@@ -48,6 +48,7 @@ export class DestinationJourneyController {
     return this.destination.mapList(u.id, body);
   }
 
+  /** @deprecated 新 UI 勿调用；写接口已 410，请改 plan/save */
   @Post('destinations/create')
   createPost(
     @CurrentUser() u: { id: string },
@@ -57,6 +58,7 @@ export class DestinationJourneyController {
     return this.destination.create(u.id, journeyId, dto);
   }
 
+  /** @deprecated 新 UI 勿调用；写接口已 410 */
   @Post('destinations/reorder')
   @HttpCode(204)
   reorderPost(

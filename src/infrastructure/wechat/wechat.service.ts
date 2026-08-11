@@ -38,10 +38,13 @@ export class WechatService {
       }
     }
 
-    // 本地种子账号：开发环境允许用固定 code 登录，即使已配置真实 AppId
+    // 本地种子账号：开发环境允许用固定 code 登录到演示用户（openid 已绑真机）
     if (!this.isProd && code === 'dev_openid_demo') {
-      this.logger.warn('使用种子账号 openid=dev_openid_demo（仅非生产）');
-      return { openid: 'dev_openid_demo', mock: true };
+      const bound =
+        this.config.get<string>('DEMO_USER_OPENID') ||
+        'oGSAD5cLUWt4wvvHh7G1gyQpyIFE';
+      this.logger.warn(`使用种子账号 openid=${bound}（仅非生产，code=dev_openid_demo）`);
+      return { openid: bound, mock: true };
     }
 
     if (!this.isConfigured()) {
@@ -109,5 +112,42 @@ export class WechatService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * 小程序码（无限量）。未配置微信时返回 null（由上层生成占位图）。
+   * scene 最长 32 字符。
+   */
+  async getUnlimitedWxaCode(input: {
+    scene: string;
+    page?: string;
+    width?: number;
+  }): Promise<{ buffer: Buffer; mock: boolean } | null> {
+    if (!this.isConfigured()) {
+      return null;
+    }
+    const token = await this.getAccessToken();
+    const { data } = await axios.post(
+      `https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=${token}`,
+      {
+        scene: input.scene.slice(0, 32),
+        page: input.page || 'pages/ShareView/ShareView',
+        width: input.width ?? 430,
+        check_path: false,
+        env_version:
+          this.config.get('NODE_ENV') === 'production' ? 'release' : 'trial',
+      },
+      { responseType: 'arraybuffer' },
+    );
+    const buf = Buffer.from(data);
+    // 失败时微信返回 JSON
+    if (buf[0] === 0x7b) {
+      const err = JSON.parse(buf.toString('utf8'));
+      this.logger.warn(`wxacode failed: ${err.errcode} ${err.errmsg}`);
+      throw new UnauthorizedException(
+        `wxacode failed: ${err.errcode} ${err.errmsg}`,
+      );
+    }
+    return { buffer: buf, mock: false };
   }
 }

@@ -70,13 +70,31 @@ export class UserService implements OnModuleInit {
     return plan === 'pro' ? 'PRO' : 'FREE';
   }
 
-  private toLegacyUserResponse(u: User) {
+  private toLegacyUserResponse(
+    u: User,
+    extra?: {
+      identities?: string[];
+      footprintCities?: number;
+      tripCount?: number;
+    },
+  ) {
     return {
       ...u,
       nick: u.nick ?? null,
       nickname: u.nick ?? null,
       avatarUrl: u.avatar ?? null,
+      gender: u.gender ?? 'UNKNOWN',
+      birthday: u.birthday ?? null,
+      provinceCode: u.provinceCode ?? null,
+      cityCode: u.cityCode ?? null,
+      departureCity: u.departureCity ?? null,
+      bio: u.bio ?? null,
       memberLevel: this.memberLevel(u.plan),
+      identities: extra?.identities ?? [],
+      stats: {
+        footprintCities: extra?.footprintCities ?? 0,
+        tripCount: extra?.tripCount ?? 0,
+      },
     };
   }
 
@@ -85,7 +103,14 @@ export class UserService implements OnModuleInit {
     if (!u) throw new NotFoundException('user not found');
     // 读取时惰性降级：pro 且过期 → free（配额回退），仅变更时落库（幂等）。
     if (this.benefit.reconcileExpiry(u)) await this.users.save(u);
-    return this.toLegacyUserResponse(u);
+    const identities = await this.userIdentities.find({ where: { userId: id } });
+    const tripCount = await this.journeys.count({ where: { userId: id } });
+    const footprintCities = await this.countFootprintCities(id);
+    return this.toLegacyUserResponse(u, {
+      identities: identities.map((i) => i.identityCode),
+      footprintCities,
+      tripCount,
+    });
   }
 
   async updateProfile(id: string, dto: UpdateProfileDto) {

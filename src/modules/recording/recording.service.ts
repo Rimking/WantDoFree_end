@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Journey } from '../../entities/journey.entity';
 import { Entry } from '../../entities/entry.entity';
 import { Location } from '../../entities/location.entity';
@@ -28,6 +28,20 @@ import {
   toLegacyKind,
   toQuotaKind,
 } from '../media/media.util';
+
+/** 从 /dream/v1/files/...（兼容旧 /api/v1/files/...）或绝对 URL 抽出 storageKey */
+function storageKeyFromMediaUrl(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    const pathOnly = url.includes('://') ? new URL(url).pathname : url;
+    const m = pathOnly.match(
+      /\/(?:(?:dream|api)\/v1\/)?files\/(\d{4}\/\d{2}\/\d{2}\/[^/?#]+)$/,
+    );
+    return m?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class RecordingService {
@@ -344,6 +358,9 @@ export class RecordingService {
           found.sizeBytes = item.size ?? sizeNumber(found.sizeBytes);
           if (item.durationSec != null) found.durationSec = item.durationSec;
           if (item.sortOrder != null) found.sortOrder = item.sortOrder;
+          if (!found.storageKey) {
+            found.storageKey = storageKeyFromMediaUrl(item.url) ?? found.storageKey;
+          }
           await manager.save(found);
           continue;
         }
@@ -353,6 +370,7 @@ export class RecordingService {
             ownerId: entryId,
             kind: storageKind,
             url: item.url,
+            storageKey: storageKeyFromMediaUrl(item.url),
             mime: storageKind === 'image' ? 'image/jpeg' : 'audio/m4a',
             sizeBytes: item.size ?? 0,
             durationSec: item.durationSec ?? null,
@@ -596,6 +614,54 @@ export class RecordingService {
       );
   }
 
+  /**
+   * 首页「最近记录」：当前用户全部记录按时间倒序取 N 条（默认/上限 10）。
+   * 不按旅程/计划筛选；时间 = COALESCE(recordedAt, createdAt)。
+   */
+  async listRecent(userId: string, limit = 10) {
+    const take = Math.min(10, Math.max(1, Math.floor(limit) || 10));
+
+    // 先只取 id，避免 expenses 一对多 join 把 take 截乱
+    const idRows = await this.entries
+      .createQueryBuilder('e')
+      .innerJoin('e.journey', 'j')
+      .select('e.id', 'id')
+      .addSelect('COALESCE(e.recordedAt, e.createdAt)', 'entry_sort_at')
+      .where('j.userId = :userId', { userId })
+      .orderBy('entry_sort_at', 'DESC')
+      .addOrderBy('e.createdAt', 'DESC')
+      .limit(take)
+      .getRawMany<{ id: string }>();
+
+    const ids = idRows.map((r) => r.id).filter(Boolean);
+    if (!ids.length) {
+      return { list: [], limit: take, total: 0 };
+    }
+
+    const rows = await this.entries.find({
+      where: { id: In(ids) },
+      relations: ['journey', 'location', 'expenses'],
+    });
+    const byId = new Map(rows.map((e) => [e.id, e]));
+    const ordered = ids
+      .map((id) => byId.get(id))
+      .filter((e): e is Entry => !!e);
+
+    await this.mediaService.attachToEntries(ordered);
+
+    const list = ordered.map((e) => {
+      const flat = this.toEntryResponse(e, e.journey.startDate);
+      const mod = this.toEntryModule(flat);
+      return {
+        ...mod,
+        journeyId: e.journeyId,
+        journeyTitle: e.journey.title ?? null,
+      };
+    });
+
+    return { list, limit: take, total: list.length };
+  }
+
   private assertRecordedInRange(
     journey: Journey,
     recordedAt: Date,
@@ -799,16 +865,33 @@ export class RecordingService {
         const legacyPhotos = await manager.find(Media, {
           where: { ownerType: 'entry', ownerId: entry.id, kind: 'photo' },
         });
-        const toRemove = [...existingPhotos, ...legacyPhotos];
-        if (toRemove.length) await manager.remove(toRemove);
+        const existing = [...existingPhotos, ...legacyPhotos];
+        const keepIds = new Set<string>();
         for (let i = 0; i < dto.images.length; i++) {
           const url = dto.images[i];
+          const key = storageKeyFromMediaUrl(url);
+          const found = existing.find(
+            (m) =>
+              m.url === url ||
+              (!!key && (m.storageKey === key || (m.url || '').includes(key))),
+          );
+          if (found) {
+            found.url = url;
+            found.storageKey = found.storageKey || key;
+            found.kind = 'image';
+            found.sortOrder = i;
+            found.status = 'active';
+            await manager.save(found);
+            keepIds.add(found.id);
+            continue;
+          }
           await manager.save(
             manager.create(Media, {
               ownerType: 'entry',
               ownerId: entry.id,
               kind: 'image',
               url,
+              storageKey: key,
               mime: 'image/jpeg',
               sizeBytes: 0,
               sortOrder: i,
@@ -818,6 +901,8 @@ export class RecordingService {
             }),
           );
         }
+        const toRemove = existing.filter((m) => !keepIds.has(m.id));
+        if (toRemove.length) await manager.remove(toRemove);
       }
 
       if (patchAudios !== undefined) {
@@ -827,16 +912,34 @@ export class RecordingService {
         const legacyVoice = await manager.find(Media, {
           where: { ownerType: 'entry', ownerId: entry.id, kind: 'voice' },
         });
-        const toRemove = [...existingVoice, ...legacyVoice];
-        if (toRemove.length) await manager.remove(toRemove);
+        const existing = [...existingVoice, ...legacyVoice];
+        const keepIds = new Set<string>();
         for (let i = 0; i < patchAudios.length; i++) {
           const a = patchAudios[i];
+          const key = storageKeyFromMediaUrl(a.url);
+          const found = existing.find(
+            (m) =>
+              m.url === a.url ||
+              (!!key && (m.storageKey === key || (m.url || '').includes(key))),
+          );
+          if (found) {
+            found.url = a.url;
+            found.storageKey = found.storageKey || key;
+            found.kind = 'audio';
+            found.durationSec = a.durationSec ?? found.durationSec;
+            found.sortOrder = i;
+            found.status = 'active';
+            await manager.save(found);
+            keepIds.add(found.id);
+            continue;
+          }
           await manager.save(
             manager.create(Media, {
               ownerType: 'entry',
               ownerId: entry.id,
               kind: 'audio',
               url: a.url,
+              storageKey: key,
               mime: 'audio/m4a',
               sizeBytes: 0,
               durationSec: a.durationSec ?? null,
@@ -847,6 +950,8 @@ export class RecordingService {
             }),
           );
         }
+        const toRemove = existing.filter((m) => !keepIds.has(m.id));
+        if (toRemove.length) await manager.remove(toRemove);
       }
 
       if (dto.locationTag !== undefined) {

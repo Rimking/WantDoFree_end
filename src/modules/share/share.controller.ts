@@ -9,7 +9,12 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ShareService } from './share.service';
-import { CreateShareDto, ViewShareDto } from './share.dto';
+import {
+  CreateShareDto,
+  CreateWxaCodeDto,
+  ExportPosterDto,
+  ViewShareDto,
+} from './share.dto';
 
 @Controller()
 export class ShareController {
@@ -23,6 +28,26 @@ export class ShareController {
     @Body() dto: CreateShareDto,
   ) {
     return this.share.createShare(u.id, dto);
+  }
+
+  /** 登记模版海报出图（客户端 Canvas + 上传后回传 URL）。 */
+  @Post('shares/poster/export')
+  @UseGuards(JwtAuthGuard)
+  exportPoster(
+    @CurrentUser() u: { id: string },
+    @Body() dto: ExportPosterDto,
+  ) {
+    return this.share.exportPoster(u.id, dto);
+  }
+
+  /** 生成分享小程序码。 */
+  @Post('shares/wxacode')
+  @UseGuards(JwtAuthGuard)
+  wxacode(
+    @CurrentUser() u: { id: string },
+    @Body() dto: CreateWxaCodeDto,
+  ) {
+    return this.share.createWxaCode(u.id, dto);
   }
 
   /** 免登录只读内容（脱敏）。 */

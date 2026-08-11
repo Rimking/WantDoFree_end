@@ -1,5 +1,9 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import {
+  BadRequestException,
+  ValidationPipe,
+  VersioningType,
+} from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -8,10 +12,18 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const isProd = process.env.NODE_ENV === 'production';
 
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('dream');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, transform: true }),
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      exceptionFactory: () =>
+        new BadRequestException({
+          code: '40001',
+          message: '参数错误',
+        }),
+    }),
   );
   app.useGlobalFilters(new HttpExceptionFilter());
 
@@ -45,7 +57,7 @@ async function bootstrap() {
       .addBearerAuth()
       .build();
     SwaggerModule.setup(
-      'api/docs',
+      'dream/docs',
       app,
       SwaggerModule.createDocument(app, doc),
     );
@@ -54,7 +66,7 @@ async function bootstrap() {
   await app.listen(process.env.PORT ?? 3000);
   // eslint-disable-next-line no-console
   console.log(
-    `🚀 途记后端已启动: http://localhost:${process.env.PORT ?? 3000}${isProd ? '' : '/api/docs'}  [STORAGE_DRIVER=${process.env.STORAGE_DRIVER || 'local'}]`,
+    `🚀 途记后端已启动: http://localhost:${process.env.PORT ?? 3000}${isProd ? '' : '/dream/docs'}  [STORAGE_DRIVER=${process.env.STORAGE_DRIVER || 'local'}]`,
   );
 }
 

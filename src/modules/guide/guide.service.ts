@@ -18,6 +18,10 @@ import {
 } from '../../common/enums/catalog';
 import { MediaService } from '../media/media.service';
 import { toLegacyKind } from '../media/media.util';
+import {
+  HANDBOOK_MIN_RECORDS,
+  normalizeGuideTemplateId,
+} from '../../common/handbook';
 
 type GuidePayload = {
   highlights: Array<{
@@ -88,12 +92,13 @@ export class GuideService {
       (e) => e.type === 'location' || Boolean(e.location),
     );
 
-    if (entries.length < 2) {
+    if (entries.length < HANDBOOK_MIN_RECORDS) {
       return {
         canGenerate: false as const,
-        reason: '再多记几笔（至少 2 条记录）再生成攻略',
+        reason: `再多记几笔（至少 ${HANDBOOK_MIN_RECORDS} 条记录）再生成游记`,
         stats: {
           entryCount: entries.length,
+          minRecords: HANDBOOK_MIN_RECORDS,
           hasPhoto,
           hasLocation,
         },
@@ -121,11 +126,22 @@ export class GuideService {
     };
   }
 
-  async generate(userId: string, journeyId: string, template = 'basic') {
+  async generate(
+    userId: string,
+    journeyId: string,
+    opts: {
+      template?: string;
+      templateId?: string;
+      force?: boolean;
+    } = {},
+  ) {
     const journey = await this.requireOwnedJourney(userId, journeyId);
+    const templateId = normalizeGuideTemplateId(
+      opts.templateId ?? opts.template,
+    );
     const existing = await this.guides.findOne({ where: { journeyId } });
-    // 幂等：已有完整攻略且未要求强制重算时，直接返回
-    if (existing?.payload) {
+    // 幂等：已有完整游记且未要求强制重算时，直接返回
+    if (existing?.payload && !opts.force) {
       return {
         canGenerate: true,
         exists: true,
@@ -145,10 +161,10 @@ export class GuideService {
       });
     }
 
-    const payload = await this.buildPayload(journey, template);
+    const payload = await this.buildPayload(journey, templateId);
 
     let guide = existing ?? this.guides.create({ journeyId });
-    guide.template = template;
+    guide.template = templateId;
     guide.payload = payload;
     guide.coverUrl =
       journey.coverUrl ??
@@ -162,6 +178,7 @@ export class GuideService {
       canGenerate: true,
       exists: true,
       idempotent: false,
+      forced: Boolean(opts.force),
       ...this.toGuideResponse(guide),
     };
   }
@@ -215,7 +232,10 @@ export class GuideService {
       throw new ForbiddenException('guide does not belong to current user');
     }
     if (!guide.payload) {
-      return this.generate(userId, guide.journeyId, guide.template || 'basic');
+      return this.generate(userId, guide.journeyId, {
+        templateId: guide.template || 'basic',
+        force: true,
+      });
     }
     return { exists: true, ...this.toGuideResponse(guide) };
   }
@@ -337,7 +357,9 @@ export class GuideService {
     await this.requireOwnedJourney(userId, journeyId);
     let guide = await this.guides.findOne({ where: { journeyId } });
     if (!guide || !guide.payload) {
-      const generated = await this.generate(userId, journeyId, 'basic');
+      const generated = await this.generate(userId, journeyId, {
+        templateId: 'basic',
+      });
       guide = await this.guides.findOne({ where: { id: generated.id } });
       if (!guide) throw new NotFoundException('guide not found');
     }
@@ -471,6 +493,9 @@ export class GuideService {
       id: guide.id,
       journeyId: guide.journeyId,
       template: guide.template,
+      templateId: guide.template,
+      /** 产品名：游记；接口资源名仍为 guide */
+      productName: '游记',
       payload,
       days: payload?.meta?.days ?? null,
       nights: payload?.meta?.nights ?? null,

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 
@@ -40,6 +40,30 @@ export class MapService {
     if (this.config.get('TENCENT_MAP_KEY')) return 'tencent';
     if (this.config.get('AMAP_KEY')) return 'amap';
     return 'mock';
+  }
+
+  /** 高德 Web 服务 status!=1 时抛错，避免静默空列表 */
+  private assertAmapOk(data: any, action: string) {
+    if (String(data?.status) === '1') return;
+    const info = data?.info || 'UNKNOWN';
+    const infocode = data?.infocode || '';
+    this.logger.error(`高德 ${action} 失败: ${info} (${infocode})`);
+    let hint = info;
+    if (infocode === '10009' || info === 'USERKEY_PLAT_NOMATCH') {
+      hint =
+        'AMAP_KEY 平台类型不匹配：后端需使用高德「Web服务」Key（非 JS/小程序 Key）';
+    } else if (infocode === '10001' || info === 'INVALID_USER_KEY') {
+      hint = 'AMAP_KEY 无效，请到高德控制台核对';
+    } else if (infocode === '10003' || info === 'DAILY_QUERY_OVER_LIMIT') {
+      hint = '高德日配额已用尽';
+    }
+    throw new BadRequestException({
+      code: '40030',
+      message: hint,
+      provider: 'amap',
+      amapInfo: info,
+      amapInfocode: infocode,
+    });
   }
 
   private toListItem(p: PoiItem): PoiListItem {
@@ -175,6 +199,7 @@ export class MapService {
         page,
       },
     });
+    this.assertAmapOk(data, 'place/text');
     const items: PoiItem[] = (data?.pois ?? []).map((p: any) => {
       const [lngStr, latStr] = String(p.location || '0,0').split(',');
       return {
@@ -271,6 +296,7 @@ export class MapService {
         },
       },
     );
+    this.assertAmapOk(data, 'place/around');
     const items: PoiItem[] = (data?.pois ?? []).map((p: any) => {
       const [lngStr, latStr] = String(p.location || '0,0').split(',');
       return {
@@ -375,6 +401,7 @@ export class MapService {
         },
       },
     );
+    this.assertAmapOk(data, 'geocode/regeo');
     const r = data?.regeocode;
     const items: PoiItem[] = [
       {

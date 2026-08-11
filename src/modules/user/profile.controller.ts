@@ -10,7 +10,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 /**
  * 个人信息编辑页 API（需求：渡清川_个人信息编辑页）
- * 路径前缀：/api/v1/user
+ * 路径前缀：/dream/v1/user
  */
 @Controller('user')
 @UseGuards(JwtAuthGuard)

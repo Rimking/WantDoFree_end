@@ -39,9 +39,13 @@ export class Journey {
   @Column({ length: 128, default: '' })
   origin: string;
 
-  /** 目的地（可选，允许先定出发后补） */
+  /** 目的地展示串（可选；与 destinations[] 同步） */
   @Column({ length: 128, nullable: true })
   destination?: string;
+
+  /** 多选目的地城市名（结构化） */
+  @Column({ type: 'json', nullable: true })
+  destinations?: string[] | null;
 
   @Column({ type: 'date' })
   startDate: string;

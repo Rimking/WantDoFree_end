@@ -4,7 +4,7 @@
  *
  *   npm run seed:demo
  *
- * 登录：POST /api/v1/auth/wechat-login  {"code":"dev_openid_demo"}
+ * 登录：POST /dream/v1/auth/wechat-login  {"code":"dev_openid_demo"}
  */
 import 'reflect-metadata';
 import { DataSource, In } from 'typeorm';
@@ -35,7 +35,9 @@ import {
 loadEnv();
 
 const USER_ID = 'aaaaaaaa-1111-1111-1111-111111111111';
-const OPENID = 'dev_openid_demo';
+/** 演示用户已绑定真机 openid；本地仍可用 code=dev_openid_demo 登录 */
+const OPENID =
+  process.env.DEMO_USER_OPENID || 'oGSAD5cLUWt4wvvHh7G1gyQpyIFE';
 
 const J = {
   /** 即将出发 */
@@ -85,9 +87,10 @@ type SeedEntry = {
   voice?: { url: string; durationSec: number; size?: number };
 };
 
+/** 封面图（已校验可访问；失效图勿再用 photo-1474181487882 / photo-1483728642387） */
 const IMG = {
   westlake:
-    'https://images.unsplash.com/photo-1474181487882-5abf3f12bbf8?auto=format&fit=crop&w=800&q=70',
+    'https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=800&q=70',
   temple:
     'https://images.unsplash.com/photo-1478436127897-769e1b3f0f36?auto=format&fit=crop&w=800&q=70',
   food:
@@ -97,7 +100,7 @@ const IMG = {
   waterfall:
     'https://images.unsplash.com/photo-1432405972618-c60b0225b8f9?auto=format&fit=crop&w=800&q=70',
   cliff:
-    'https://images.unsplash.com/photo-1483728642387-6c3bddfddda1?auto=format&fit=crop&w=800&q=70',
+    'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=70',
   dali:
     'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=70',
   town:
@@ -1232,8 +1235,8 @@ async function printSummary(ds: DataSource) {
         ` spent=${s.spent}分 guide=${s.guides} planPlaces=${places?.length ?? 0}`,
     );
   }
-  console.log('\n登录: POST /api/v1/auth/wechat-login {"code":"dev_openid_demo"}');
-  console.log('杭州攻略: GET /api/v1/journeys/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0002/guide');
+  console.log('\n登录: POST /dream/v1/auth/wechat-login {"code":"dev_openid_demo"}');
+  console.log('杭州攻略: GET /dream/v1/journeys/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0002/guide');
 }
 
 main().catch((e) => {

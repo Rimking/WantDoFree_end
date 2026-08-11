@@ -41,11 +41,11 @@ export class GuideController {
     @CurrentUser() u: { id: string },
     @Body() body: GuideCreateBodyDto,
   ) {
-    return this.guide.generate(
-      u.id,
-      body.journeyId,
-      body.template ?? 'basic',
-    );
+    return this.guide.generate(u.id, body.journeyId, {
+      template: body.template,
+      templateId: body.templateId,
+      force: body.force,
+    });
   }
 
   @Post('journeys/guide/favorite')
@@ -76,7 +76,11 @@ export class GuideController {
     @Param('id') id: string,
     @Body() dto: GenerateGuideDto,
   ) {
-    return this.guide.generate(u.id, id, dto.template ?? 'basic');
+    return this.guide.generate(u.id, id, {
+      template: dto.template,
+      templateId: dto.templateId,
+      force: dto.force,
+    });
   }
 
   @Post('journeys/:id/guide/favorite')

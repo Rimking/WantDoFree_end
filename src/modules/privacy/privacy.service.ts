@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { randomBytes } from 'crypto';
 import { User } from '../../entities/user.entity';
 import { Journey } from '../../entities/journey.entity';
 import { Entry } from '../../entities/entry.entity';
@@ -109,5 +110,20 @@ export class PrivacyService {
       },
       journeys: packs,
     };
+  }
+
+  /** 账号注销（软删）：打乱 openid，status=deleted */
+  async deleteAccount(userId: string) {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('user not found');
+    const suffix = randomBytes(6).toString('hex');
+    user.status = 'deleted';
+    user.openid = `deleted_${user.id.slice(0, 8)}_${suffix}`;
+    user.unionid = undefined;
+    user.phone = undefined;
+    user.nick = undefined;
+    user.avatar = undefined;
+    await this.users.save(user);
+    return { ok: true, deleted: true };
   }
 }

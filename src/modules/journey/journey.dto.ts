@@ -74,7 +74,13 @@ export class CreateJourneyDto {
 
   @IsString() @Length(1, 128) origin: string;
 
-  @IsOptional() @IsString() @Length(1, 128) destination?: string;
+  @IsOptional() @IsString() @Length(0, 256) destination?: string;
+
+  /** 多选目的地；优先于 destination 字符串 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  destinations?: string[];
 
   @IsDateString() startDate: string;
   @IsDateString() endDate: string;
@@ -107,12 +113,37 @@ export class CreateJourneyDto {
   @IsOptional() @IsInt() @Min(0) budgetLimit?: number;
 
   @IsOptional() @IsBoolean() isPublic?: boolean;
+
+  /** 创建时内嵌预定点（写入 plan.places，intent 默认 wish） */
+  @IsOptional()
+  @IsArray()
+  places?: Array<{
+    clientId?: string;
+    id?: string;
+    name: string;
+    note?: string;
+    coverUrl?: string;
+    cover?: string;
+    lat?: number;
+    lng?: number;
+    latitude?: number;
+    longitude?: number;
+    locationName?: string;
+    category?: string;
+    dayIndex?: number | null;
+    intent?: string;
+    images?: string[];
+  }>;
 }
 
 export class UpdateJourneyDto {
   @IsOptional() @IsString() @Length(1, 128) title?: string;
   @IsOptional() @IsString() @Length(1, 128) origin?: string;
-  @IsOptional() @IsString() @Length(0, 128) destination?: string;
+  @IsOptional() @IsString() @Length(0, 256) destination?: string;
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  destinations?: string[];
   @IsOptional() @IsDateString() startDate?: string;
   @IsOptional() @IsDateString() endDate?: string;
   @IsOptional() @IsString() coverUrl?: string;
@@ -175,8 +206,11 @@ export class UpsertPlanDto {
     locationName?: string;
     address?: string;
     category?: string;
-    dayIndex?: number;
+    dayIndex?: number | null;
+    /** wish | planned | must */
+    intent?: string;
     images?: string[];
+    sortOrder?: number;
   }>;
 
   @IsOptional()
@@ -208,8 +242,10 @@ export class PatchPlanDto {
     locationName?: string;
     address?: string;
     category?: string;
-    dayIndex?: number;
+    dayIndex?: number | null;
+    intent?: string;
     images?: string[];
+    sortOrder?: number;
   }>;
 
   @IsOptional()

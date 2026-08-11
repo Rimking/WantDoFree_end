@@ -22,6 +22,7 @@ import {
 import {
   EntriesDeleteBodyDto,
   EntriesListBodyDto,
+  EntriesRecentBodyDto,
   EntriesSyncBodyDto,
 } from '../journey/journey-api.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -46,6 +47,15 @@ export class RecordingController {
     );
     if (body.modular === false) return rows;
     return rows.map((e) => this.recording.toEntryModule(e));
+  }
+
+  /** 首页最近记录：当前用户跨旅程最近 10 条 */
+  @Post('entries/recent')
+  recentPost(
+    @CurrentUser() u: { id: string },
+    @Body() body: EntriesRecentBodyDto,
+  ) {
+    return this.recording.listRecent(u.id, body?.limit ?? 10);
   }
 
   @Post('entries/sync')
@@ -124,6 +134,15 @@ export class RecordingController {
 @UseGuards(JwtAuthGuard)
 export class RecordsController {
   constructor(private readonly recording: RecordingService) {}
+
+  /** 首页最近记录：按时间倒序，最多 10 条（与 /journeys/entries/recent 同构） */
+  @Post('recent')
+  recentPost(
+    @CurrentUser() u: { id: string },
+    @Body() body: EntriesRecentBodyDto,
+  ) {
+    return this.recording.listRecent(u.id, body?.limit ?? 10);
+  }
 
   @Post('update')
   updatePost(

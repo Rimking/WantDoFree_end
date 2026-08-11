@@ -15,7 +15,18 @@ export class GenerateGuideDto {
   @IsString()
   @MaxLength(32)
   template?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  templateId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
 }
+
+// keep class-validator IsBoolean used above
 
 @ValidatorConstraint({ name: 'shareChannel', async: false })
 class ShareChannelConstraint implements ValidatorConstraintInterface {

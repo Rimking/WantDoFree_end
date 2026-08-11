@@ -80,16 +80,16 @@ async function main(): Promise<void> {
     const { NestFactory } = await import('@nestjs/core');
     const { AppModule } = await import('../app.module');
     app = await NestFactory.create(AppModule);
-    app.setGlobalPrefix('api');
+    app.setGlobalPrefix('dream');
     await app.init();
     const server = app.getHttpServer();
     await new Promise<void>((resolve) => server.listen(0, resolve));
     const addr: any = server.address();
-    API_URL = `http://localhost:${addr.port}/api`;
+    API_URL = `http://localhost:${addr.port}/dream/v1`;
     console.log('  · 进程内自启 Nest，监听 ' + API_URL);
   } else {
     const base = process.env.E2E_BASE_URL || 'http://localhost:3000';
-    API_URL = base + '/api';
+    API_URL = base + '/dream/v1';
     console.log('  目标: ' + base + '  (E2E_BASE_URL 可覆盖；E2E_INPROC=1 可进程内自启)');
   }
   console.log('');
