@@ -3,11 +3,14 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Length,
   Min,
   Max,
+  ArrayMaxSize,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -16,7 +19,6 @@ import {
   UpdateStatusDto,
   UpsertPlanDto,
 } from './journey.dto';
-import { SyncEntryDto } from '../recording/recording.dto';
 
 export const JOURNEY_DETAIL_INCLUDES = [
   'entries',
@@ -90,6 +92,14 @@ export class JourneyListBodyDto {
   pageSize?: number = 20;
 
   /**
+   * 排序字段（首页「最近攻略」用 updatedAt）
+   * 默认 createdAt，保持历史列表兼容
+   */
+  @IsOptional()
+  @IsIn(['createdAt', 'updatedAt'])
+  sortBy?: 'createdAt' | 'updatedAt';
+
+  /**
    * @deprecated 列表已固定返回扁平卡片对象，传此字段无效（可省略）
    */
   @IsOptional()
@@ -121,6 +131,32 @@ export class JourneyDetailBodyDto {
   @IsArray()
   @IsIn([...JOURNEY_DETAIL_INCLUDES], { each: true })
   include?: JourneyDetailInclude[];
+}
+
+/** 旅程详情页（item/detail）请求体，与 detail 互斥 */
+export class JourneyItemDetailBodyDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  journeyId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  id?: string;
+}
+
+/** 游记预览页（handbook/detail）请求体，与 detail / itemDetail 互斥 */
+export class JourneyHandbookDetailBodyDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  journeyId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  id?: string;
 }
 
 export class JourneyUpdateBodyDto extends UpdateJourneyDto {
@@ -157,6 +193,76 @@ export class JourneyPlanToggleCheckBodyDto {
   checkId: string;
 }
 
+/** 新建预定点（单点追加，不整包覆盖） */
+export class PlanPlaceCreateBodyDto {
+  @IsString()
+  @Length(1, 64)
+  journeyId: string;
+
+  @IsString()
+  @Length(1, 128)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+
+  /** 关联日期+预计时间，格式 `2026-09-18 00:00:00`，与记录 recordedAt 相同 */
+  @IsOptional()
+  @IsString()
+  recordedAt?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  lat?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  lng?: number | null;
+
+  @IsOptional()
+  @IsString()
+  coverUrl?: string;
+
+  /** 已上传媒体 id（/media/confirm 返回的 id），后端直接关联 */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  mediaIds?: string[];
+
+  /** 标签：合并 category + intent，如 ["sight", "must"] */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  tags?: string[];
+}
+
+/** @deprecated 用 PlanPlaceCreateBodyDto */
+export class JourneyPlanPlaceUpsertBodyDto {
+  @IsString()
+  @Length(1, 64)
+  journeyId: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => PlanPlaceCreateBodyDto)
+  places?: PlanPlaceCreateBodyDto[];
+}
+
+export class JourneyPlanPlaceDeleteBodyDto {
+  @IsString()
+  @Length(1, 64)
+  journeyId: string;
+
+  @IsString()
+  @Length(1, 64)
+  clientId: string;
+}
+
 export class EntriesListBodyDto {
   @IsString()
   @Length(1, 64)
@@ -180,17 +286,6 @@ export class EntriesRecentBodyDto {
   @Min(1)
   @Max(10)
   limit?: number = 10;
-}
-
-export class EntriesSyncBodyDto {
-  @IsString()
-  @Length(1, 64)
-  journeyId: string;
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => SyncEntryDto)
-  entries: SyncEntryDto[];
 }
 
 export class EntriesDeleteBodyDto {
@@ -256,13 +351,4 @@ export class HandbookListBodyDto {
   @IsOptional()
   @IsString()
   phase?: string;
-}
-
-export class GuideFavoriteBodyDto {
-  @IsString()
-  @Length(1, 64)
-  journeyId: string;
-
-  @IsOptional()
-  isFavorited?: boolean;
 }

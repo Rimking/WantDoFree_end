@@ -72,15 +72,10 @@ export class CreateJourneyDto {
 
   @IsString() @Length(1, 128) title: string;
 
-  @IsString() @Length(1, 128) origin: string;
+  /** 出发地（选填；可空提交） */
+  @IsOptional() @IsString() @Length(0, 128) origin?: string;
 
   @IsOptional() @IsString() @Length(0, 256) destination?: string;
-
-  /** 多选目的地；优先于 destination 字符串 */
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  destinations?: string[];
 
   @IsDateString() startDate: string;
   @IsDateString() endDate: string;
@@ -130,7 +125,15 @@ export class CreateJourneyDto {
     longitude?: number;
     locationName?: string;
     category?: string;
+    /** @deprecated 由 recordedAt 派生，不必传 */
     dayIndex?: number | null;
+    /**
+     * 关联日期+预计时间拼好的字符串，格式 `2026-09-18 00:00:00`
+     * 与新建记录 entries[].recordedAt 同一字段、同一格式
+     */
+    recordedAt?: string | null;
+    /** @deprecated 请改传 recordedAt */
+    visitTime?: string | null;
     intent?: string;
     images?: string[];
   }>;
@@ -140,10 +143,6 @@ export class UpdateJourneyDto {
   @IsOptional() @IsString() @Length(1, 128) title?: string;
   @IsOptional() @IsString() @Length(1, 128) origin?: string;
   @IsOptional() @IsString() @Length(0, 256) destination?: string;
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  destinations?: string[];
   @IsOptional() @IsDateString() startDate?: string;
   @IsOptional() @IsDateString() endDate?: string;
   @IsOptional() @IsString() coverUrl?: string;
@@ -177,18 +176,6 @@ export class UpdateStatusDto {
   @IsOptional() @Validate(StatusConstraint) status?: string;
 }
 
-export class ListJourneyQueryDto {
-  /** 持久化三态：planned|ongoing|finished */
-  @IsOptional()
-  @Validate(StatusConstraint)
-  status?: string;
-
-  /** 展示态筛选：planning|departing|ongoing|finished|draft */
-  @IsOptional()
-  @IsIn(['planning', 'departing', 'ongoing', 'finished', 'draft'])
-  displayStatus?: string;
-}
-
 export class UpsertPlanDto {
   @IsOptional()
   @IsArray()
@@ -206,7 +193,12 @@ export class UpsertPlanDto {
     locationName?: string;
     address?: string;
     category?: string;
+    /** @deprecated 由 recordedAt 派生，不必传 */
     dayIndex?: number | null;
+    /** 关联日期+预计时间，格式 `2026-09-18 00:00:00`，与记录 recordedAt 相同 */
+    recordedAt?: string | null;
+    /** @deprecated 请改传 recordedAt */
+    visitTime?: string | null;
     /** wish | planned | must */
     intent?: string;
     images?: string[];
@@ -242,7 +234,12 @@ export class PatchPlanDto {
     locationName?: string;
     address?: string;
     category?: string;
+    /** @deprecated 由 recordedAt 派生，不必传 */
     dayIndex?: number | null;
+    /** 关联日期+预计时间，格式 `2026-09-18 00:00:00` */
+    recordedAt?: string | null;
+    /** @deprecated 请改传 recordedAt */
+    visitTime?: string | null;
     intent?: string;
     images?: string[];
     sortOrder?: number;

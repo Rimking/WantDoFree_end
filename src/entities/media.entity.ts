@@ -35,8 +35,8 @@ export class Media {
   @Column({ type: 'varchar', length: 24 })
   ownerType: MediaOwnerType | string;
 
-  @Column({ type: 'varchar', length: 36 })
-  ownerId: string;
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  ownerId: string | null;
 
   /** 规范值 image|audio；写入兼容 photo|voice */
   @Column({ type: 'varchar', length: 12 })
@@ -88,12 +88,12 @@ export class Media {
   @Column({ type: 'varchar', length: 36, nullable: true })
   createdBy?: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 
-  @DeleteDateColumn()
+  @DeleteDateColumn({ type: 'datetime', precision: 0 })
   deletedAt?: Date | null;
 }

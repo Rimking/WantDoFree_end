@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../common/datetime.util';
+
 import {
   Injectable,
   NotFoundException,
@@ -13,7 +15,6 @@ import { ConfigService } from '@nestjs/config';
 import { Media } from '../../entities/media.entity';
 import { Entry } from '../../entities/entry.entity';
 import { Journey } from '../../entities/journey.entity';
-import { Destination } from '../../entities/destination.entity';
 import { Guide } from '../../entities/guide.entity';
 import { User } from '../../entities/user.entity';
 import { StorageDriverFactory } from '../../infrastructure/storage/storage-driver.factory';
@@ -60,8 +61,6 @@ export class MediaService {
     @InjectRepository(Media) private readonly media: Repository<Media>,
     @InjectRepository(Entry) private readonly entries: Repository<Entry>,
     @InjectRepository(Journey) private readonly journeys: Repository<Journey>,
-    @InjectRepository(Destination)
-    private readonly destinations: Repository<Destination>,
     @InjectRepository(Guide) private readonly guides: Repository<Guide>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly drivers: StorageDriverFactory,
@@ -95,7 +94,7 @@ export class MediaService {
       storageTier: m.storageTier,
       driver: m.driver,
       checksum: m.checksum ?? null,
-      createdAt: m.createdAt,
+      createdAt: formatDateTime(m.createdAt),
     };
   }
 
@@ -112,7 +111,7 @@ export class MediaService {
       },
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
-    const map = new Map<string, Media[]>();
+    const map = new Map<string | null, Media[]>();
     for (const m of rows) {
       const list = map.get(m.ownerId) ?? [];
       list.push(m);
@@ -165,15 +164,7 @@ export class MediaService {
       return;
     }
     if (ownerType === 'destination') {
-      const dest = await this.destinations.findOne({
-        where: { id: ownerId, deletedAt: IsNull() },
-      });
-      if (!dest) throw new NotFoundException('destination not found');
-      const journey = await this.journeys.findOne({
-        where: { id: dest.journeyId, userId },
-      });
-      if (!journey) throw new ForbiddenException('destination not owned');
-      return;
+      throw new BadRequestException(`unsupported ownerType: ${ownerType}`);
     }
     if (ownerType === 'guide') {
       const guide = await this.guides.findOne({ where: { id: ownerId } });
@@ -231,7 +222,9 @@ export class MediaService {
     const sizeErr = assertSizeAllowed(kind, dto.sizeBytes);
     if (sizeErr) throw new BadRequestException(sizeErr);
 
-    await this.assertOwnerAccess(userId, dto.ownerType, dto.ownerId);
+    if (dto.ownerId) {
+          await this.assertOwnerAccess(userId, dto.ownerType, dto.ownerId);
+        }
 
     const quotaKind = toQuotaKind(kind);
     const usage =
@@ -248,7 +241,7 @@ export class MediaService {
     const target = await driver.getUploadTarget(
       {
         ownerType: dto.ownerType,
-        ownerId: dto.ownerId,
+        ownerId: dto.ownerId ?? null,
         kind,
         mime: dto.mime,
         sizeBytes: dto.sizeBytes,
@@ -263,7 +256,7 @@ export class MediaService {
       this.media.create({
         id: mediaId,
         ownerType: dto.ownerType,
-        ownerId: dto.ownerId,
+        ownerId: dto.ownerId ?? null,
         kind,
         mime: dto.mime,
         ext,
@@ -363,13 +356,15 @@ export class MediaService {
   /** 头像 / 封面写回主表（local-upload 与 confirm 均可调用，幂等） */
   private async applyOwnerSideEffects(
     userId: string,
-    m: { ownerType: string; ownerId: string; url?: string | null },
+    m: { ownerType: string; ownerId: string | null; url?: string | null },
   ) {
     if (!m.url) return;
     if (m.ownerType === 'avatar') {
+      if (!m.ownerId) return;
       await this.users.update({ id: userId }, { avatar: m.url });
     }
     if (m.ownerType === 'journey_cover') {
+      if (!m.ownerId) return;
       await this.journeys.update(
         { id: m.ownerId, userId },
         { coverUrl: m.url },
@@ -422,37 +417,6 @@ export class MediaService {
     await this.applyOwnerSideEffects(userId, m);
 
     return this.toDto(m);
-  }
-
-  /** 旧 GET /media/upload-url */
-  async getUploadUrlLegacy(
-    userId: string,
-    key: string,
-    kindRaw: string,
-  ) {
-    const kind = normalizeMediaKind(kindRaw);
-    if (!kind) throw new BadRequestException('kind must be photo|voice|image|audio');
-    if (!key) throw new BadRequestException('key required');
-    await this.quota.assertWithin(userId, toQuotaKind(kind), 1);
-    const driver = this.drivers.get();
-    const target = await driver.getUploadTarget(
-      {
-        ownerType: 'entry',
-        ownerId: 'legacy',
-        kind,
-        mime: kind === 'image' ? 'image/jpeg' : 'audio/m4a',
-        sizeBytes: 0,
-      },
-      randomUUID(),
-      'legacy',
-      key.replace(/^\/+/, ''),
-    );
-    return {
-      ...target,
-      deprecated: true,
-      hint: '请改用 POST /media/prepare',
-      driver: driver.name,
-    };
   }
 
   /** 旧 POST /media/confirm（直接落库 active） */

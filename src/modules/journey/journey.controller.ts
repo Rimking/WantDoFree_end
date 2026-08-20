@@ -2,31 +2,22 @@ import {
   BadRequestException,
   Body,
   Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
   Post,
-  Put,
-  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JourneyService } from './journey.service';
 import { JourneyAggregateService } from './journey-aggregate.service';
-import {
-  CreateJourneyDto,
-  ListJourneyQueryDto,
-  PatchPlanDto,
-  UpdateJourneyDto,
-  UpdateStatusDto,
-  UpsertPlanDto,
-} from './journey.dto';
+import { CreateJourneyDto } from './journey.dto';
 import {
   HandbookListBodyDto,
   JourneyDetailBodyDto,
+  JourneyHandbookDetailBodyDto,
   JourneyIdBodyDto,
+  JourneyItemDetailBodyDto,
   JourneyListBodyDto,
   JourneyPlanGetBodyDto,
+  JourneyPlanPlaceDeleteBodyDto,
+  PlanPlaceCreateBodyDto,
   JourneyPlanSaveBodyDto,
   JourneyPlanToggleCheckBodyDto,
   JourneyStatusBodyDto,
@@ -36,9 +27,8 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 /**
- * 旅程 API。
- * 新契约（盘点文档）：有参一律 POST + body；无参可 GET。
- * 旧 path 风格 GET/PATCH/DELETE 保留一期兼容。
+ * 旅程 API（新契约：有参一律 POST + body）。
+ * 旧 path 风格 GET/PATCH/DELETE 兼容端点已于 2026-08-20 全部下线。
  */
 @Controller('journeys')
 @UseGuards(JwtAuthGuard)
@@ -95,6 +85,38 @@ export class JourneyController {
       throw new BadRequestException('journeyId or id is required');
     }
     return this.aggregate.detail(u.id, journeyId, body.include);
+  }
+
+  /**
+   * 旅程详情页聚合（lean）：旅程基础 + 记录时间线 + 花费统计 + 按天地点。
+   * 与 detail 互斥：detail 留给游记预览，本接口专供 JourneyDetail 页面。
+   */
+  @Post('item/detail')
+  itemDetail(
+    @CurrentUser() u: { id: string },
+    @Body() body: JourneyItemDetailBodyDto,
+  ) {
+    const journeyId = body.journeyId ?? body.id;
+    if (!journeyId) {
+      throw new BadRequestException('journeyId or id is required');
+    }
+    return this.aggregate.itemDetail(u.id, journeyId);
+  }
+
+  /**
+   * 游记预览页聚合（lean）：旅程基础 + 记录时间线 + 预定点列表。
+   * 与 detail / itemDetail 互斥：本接口专供 HandbookView。
+   */
+  @Post('handbook/detail')
+  handbookDetail(
+    @CurrentUser() u: { id: string },
+    @Body() body: JourneyHandbookDetailBodyDto,
+  ) {
+    const journeyId = body.journeyId ?? body.id;
+    if (!journeyId) {
+      throw new BadRequestException('journeyId or id is required');
+    }
+    return this.aggregate.handbookDetail(u.id, journeyId);
   }
 
   @Post('update')
@@ -156,6 +178,34 @@ export class JourneyController {
   }
 
   /**
+   * 新建预定点：单点追加，不整包覆盖；传已上传 mediaId 关联。
+   * clientId 由服务端生成（内部幂等/删除用），前端不必传。
+   */
+  @Post('plan/place/create')
+  planPlaceCreate(
+    @CurrentUser() u: { id: string },
+    @Body() body: PlanPlaceCreateBodyDto,
+  ) {
+    return this.journey
+      .createPlanPlace(u.id, body.journeyId, body)
+      .then((p) => this.journey.toPlanModule(p));
+  }
+
+  /**
+   * 单点删除预定点：只传 clientId，后端联动删占位记录。
+   * 契约见 docs/前端对接_预定点单点接口_2026-08-20.md
+   */
+  @Post('plan/place/delete')
+  planPlaceDelete(
+    @CurrentUser() u: { id: string },
+    @Body() body: JourneyPlanPlaceDeleteBodyDto,
+  ) {
+    return this.journey
+      .deletePlanPlace(u.id, body.journeyId, body.clientId)
+      .then((p) => this.journey.toPlanModule(p));
+  }
+
+  /**
    * @deprecated 勿用于准备事项进度；真源为 /checklist/toggle。
    * 仅兼容旧客户端写 plan.checks。
    */
@@ -167,96 +217,5 @@ export class JourneyController {
     return this.journey
       .togglePlanCheck(u.id, body.journeyId, body.checkId)
       .then((p) => this.journey.toPlanModule(p));
-  }
-
-  // ─── 兼容：旧 path / 方法 ───────────────────────────────
-
-  @Post()
-  create(@CurrentUser() u: { id: string }, @Body() dto: CreateJourneyDto) {
-    return this.journey.create(u.id, dto);
-  }
-
-  @Get()
-  list(
-    @CurrentUser() u: { id: string },
-    @Query() query: ListJourneyQueryDto,
-  ) {
-    return this.journey.list(u.id, query.status, query.displayStatus);
-  }
-
-  @Get(':id')
-  detail(@CurrentUser() u: { id: string }, @Param('id') id: string) {
-    return this.journey.detail(u.id, id);
-  }
-
-  @Patch(':id')
-  update(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: UpdateJourneyDto,
-  ) {
-    return this.journey.update(u.id, id, dto);
-  }
-
-  @Put(':id')
-  updatePut(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: UpdateJourneyDto,
-  ) {
-    return this.journey.update(u.id, id, dto);
-  }
-
-  @Post(':id/status')
-  statusPost(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: UpdateStatusDto,
-  ) {
-    return this.journey.updateStatus(u.id, id, dto);
-  }
-
-  @Patch(':id/status')
-  statusPatch(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: UpdateStatusDto,
-  ) {
-    return this.journey.updateStatus(u.id, id, dto);
-  }
-
-  @Post(':id/finish')
-  finish(@CurrentUser() u: { id: string }, @Param('id') id: string) {
-    return this.journey.finish(u.id, id);
-  }
-
-  @Delete(':id')
-  remove(@CurrentUser() u: { id: string }, @Param('id') id: string) {
-    return this.journey.remove(u.id, id);
-  }
-
-  @Get(':id/plan')
-  getPlan(@CurrentUser() u: { id: string }, @Param('id') id: string) {
-    return this.journey
-      .getPlan(u.id, id)
-      .then((p) => this.journey.toPlanModule(p));
-  }
-
-  @Put(':id/plan')
-  putPlan(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: UpsertPlanDto,
-  ) {
-    return this.journey.putPlan(u.id, id, dto);
-  }
-
-  @Patch(':id/plan')
-  patchPlan(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: PatchPlanDto,
-  ) {
-    return this.journey.patchPlan(u.id, id, dto);
   }
 }

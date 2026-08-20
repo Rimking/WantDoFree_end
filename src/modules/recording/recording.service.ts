@@ -4,13 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+ 
+import { randomUUID } from 'crypto';
 import { Journey } from '../../entities/journey.entity';
 import { Entry } from '../../entities/entry.entity';
 import { Location } from '../../entities/location.entity';
 import { Expense } from '../../entities/expense.entity';
 import { Media } from '../../entities/media.entity';
 import {
+  CreateEntryBodyDto,
   PatchRecordDto,
   PatchRecordTimeDto,
   SyncEntryDto,
@@ -28,6 +30,7 @@ import {
   toLegacyKind,
   toQuotaKind,
 } from '../media/media.util';
+import { formatDateTime } from '../../common/datetime.util';
 
 /** 从 /dream/v1/files/...（兼容旧 /api/v1/files/...）或绝对 URL 抽出 storageKey */
 function storageKeyFromMediaUrl(url?: string | null): string | null {
@@ -276,9 +279,16 @@ export class RecordingService {
             : entry.payload;
           entry.type = type;
           entry.syncVersion += 1;
+          const at = this.parseRecordedAtStrict(e.recordedAt);
+          this.assertRecordedInRange(journey, at);
+          entry.recordedAt = at;
+          if (e.dayIndex != null) entry.dayIndex = e.dayIndex;
+          if (e.city !== undefined) entry.city = e.city ?? null;
           entry = await manager.save(entry);
           await this.upsertChildren(manager, entry.id, e, userId, false);
         } else {
+          const recordedAt = this.parseRecordedAtStrict(e.recordedAt);
+          this.assertRecordedInRange(journey, recordedAt);
           entry = await manager.save(
             manager.create(Entry, {
               journeyId: journey.id,
@@ -286,7 +296,9 @@ export class RecordingService {
               type,
               content: e.content,
               payload: Object.keys(payload).length ? payload : undefined,
-              recordedAt: new Date(),
+              recordedAt,
+              dayIndex: e.dayIndex ?? null,
+              city: e.city ?? null,
             }),
           );
           await this.upsertChildren(manager, entry.id, e, userId, true);
@@ -302,6 +314,91 @@ export class RecordingService {
       }
 
       return { synced: results };
+    });
+  }
+
+  /**
+   * 新建记录（单条，一次调用）：journey 校验 → 建 entry + 定位/花费。
+   * 媒体按上传返回的 mediaId 直接关联（上传时 /media/confirm 已计配额，这里不再重复计）。
+   */
+  async createEntry(userId: string, dto: CreateEntryBodyDto) {
+    const journey = await this.journeys.findOne({
+      where: { id: dto.journeyId, userId },
+    });
+    if (!journey) throw new NotFoundException('journey not found');
+
+    await this.assertContentSafe(dto.content);
+    const recordedAt = this.parseRecordedAtStrict(dto.recordedAt);
+    this.assertRecordedInRange(journey, recordedAt);
+
+    const syncLike = { ...dto, clientId: '' } as SyncEntryDto;
+
+    // mediaIds → 媒体 kind（type 推导用）；归属校验，关联在事务内完成
+    const mediaRows = dto.mediaIds?.length
+      ? await this.mediaRepo.find({
+          where: { id: In(dto.mediaIds), createdBy: userId },
+        })
+      : [];
+    if (dto.mediaIds?.length && mediaRows.length !== dto.mediaIds.length) {
+      throw new BadRequestException('media not found');
+    }
+    const type = inferRecordType({
+      ...syncLike,
+      media: mediaRows.map((r) => ({ kind: r.kind })),
+    });
+
+    return this.dataSource.transaction(async (manager) => {
+      const entry = await manager.save(
+        manager.create(Entry, {
+          journeyId: journey.id,
+          clientId: `srv_${randomUUID()}`,
+          type,
+          content: dto.content,
+          recordedAt,
+          dayIndex: dto.dayIndex ?? null,
+          payload: dto.tags?.length ? { tags: dto.tags } : undefined,
+        }),
+      );
+
+      if (dto.mediaIds?.length) {
+        const rows = await manager.find(Media, {
+          where: { id: In(dto.mediaIds), createdBy: userId },
+        });
+        const found = new Set(rows.map((r) => r.id));
+        const missing = dto.mediaIds.filter((id) => !found.has(id));
+        if (missing.length) {
+          throw new BadRequestException(
+            `media not found: ${missing.join(', ')}`,
+          );
+        }
+        for (const row of rows) {
+          if (row.ownerId && row.ownerId !== entry.id) {
+            throw new BadRequestException(
+              `media ${row.id} already linked to another entry`,
+            );
+          }
+          if (row.status !== 'active') {
+            throw new BadRequestException(`media ${row.id} not confirmed`);
+          }
+          row.ownerId = entry.id;
+          await manager.save(row);
+        }
+      }
+
+      await this.upsertChildren(
+        manager,
+        entry.id,
+        { ...syncLike, clientId: entry.clientId },
+        userId,
+        false,
+      );
+
+      return {
+        id: entry.id,
+        type: entry.type,
+        recordedAt: formatDateTime(entry.recordedAt),
+        dayIndex: entry.dayIndex,
+      };
     });
   }
 
@@ -469,18 +566,14 @@ export class RecordingService {
     return {
       ...e,
       content: e.content ?? '',
-      recordedAt: recordedAt.toISOString(),
+      recordedAt: formatDateTime(recordedAt),
+      createdAt: formatDateTime(e.createdAt),
+      updatedAt: formatDateTime(e.updatedAt),
       dayIndex,
+      tags: (e.payload as any)?.tags ?? [],
       images: photos.map((p) => p.url),
       audioUrl: voiceMedia ? voiceMedia.url : null,
       audioDuration: durationSec ?? null,
-      locationTag: e.location
-        ? {
-            name: e.location.name ?? '',
-            lat: e.location.lat,
-            lng: e.location.lng,
-          }
-        : null,
       location: e.location ?? null,
       expenses,
       expense: expenseCompat,
@@ -545,22 +638,25 @@ export class RecordingService {
       type: raw.type,
       content: raw.content ?? '',
       dayIndex: raw.dayIndex,
-      recordedAt: raw.recordedAt,
-      createdAt: raw.createdAt,
-      syncVersion: raw.syncVersion,
+      city: raw.city ?? null,
+      tags: raw.payload?.tags ?? [],
+      /** 占位记录来源标记（白名单）：plan_place = 预定点生成；普通记录为 null */
+      payload: raw.payload
+        ? {
+            source: raw.payload.source ?? null,
+            placeClientId: raw.payload.placeClientId ?? null,
+            durationSec: raw.payload.durationSec ?? null,
+          }
+        : null,
+      recordedAt: formatDateTime(raw.recordedAt),
+      createdAt: formatDateTime(raw.createdAt),
       location: raw.location
         ? {
             lat: raw.location.lat,
             lng: raw.location.lng,
             name: raw.location.name ?? null,
           }
-        : raw.locationTag
-          ? {
-              lat: raw.locationTag.lat,
-              lng: raw.locationTag.lng,
-              name: raw.locationTag.name ?? null,
-            }
-          : null,
+        : null,
       expenses: expenses.map((x: any) => ({
         amountCent: x.amountCent,
         category: x.category,
@@ -601,17 +697,18 @@ export class RecordingService {
     const rows = await this.entries.find({
       where: { journeyId },
       relations: ['location', 'expenses'],
-      order: { createdAt: 'ASC' },
+      order: { recordedAt: 'DESC', createdAt: 'DESC' },
     });
     await this.mediaService.attachToEntries(rows);
     const mapped = rows.map((e) => this.toEntryResponse(e, journey.startDate));
     if (dayIndex == null) return mapped;
     return mapped
       .filter((e) => e.dayIndex === dayIndex)
-      .sort(
-        (a, b) =>
-          new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime(),
-      );
+      .sort((a, b) => {
+        const t1 = a.recordedAt ? new Date(a.recordedAt).getTime() : 0;
+        const t2 = b.recordedAt ? new Date(b.recordedAt).getTime() : 0;
+        return t2 - t1;
+      });
   }
 
   /**
@@ -662,6 +759,56 @@ export class RecordingService {
     return { list, limit: take, total: list.length };
   }
 
+  /** 新建记录必填时间：仅 `YYYY-MM-DD HH:mm:ss` */
+  private parseRecordedAtStrict(raw: string): Date {
+    const s = String(raw ?? '').trim();
+    const m = s.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+    if (!m) {
+      throw new BadRequestException({
+        code: '40001',
+        message: 'recordedAt 格式应为 YYYY-MM-DD HH:mm:ss',
+      });
+    }
+    const hh = Number(m[2]);
+    const mm = Number(m[3]);
+    const ss = Number(m[4]);
+    if (hh > 23 || mm > 59 || ss > 59) {
+      throw new BadRequestException({
+        code: '40001',
+        message: 'recordedAt 格式应为 YYYY-MM-DD HH:mm:ss',
+      });
+    }
+    const d = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}`);
+    if (Number.isNaN(d.getTime())) {
+      throw new BadRequestException({
+        code: '40001',
+        message: 'recordedAt 格式应为 YYYY-MM-DD HH:mm:ss',
+      });
+    }
+    return d;
+  }
+
+  /** 解析记录时间：ISO 或 `YYYY-MM-DD HH:mm:ss`（改时间接口） */
+  private parseRecordedAt(raw: string): Date {
+    const s = String(raw).trim();
+    const spaced = s.match(
+      /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/,
+    );
+    if (spaced) {
+      const sec = spaced[4] ?? '00';
+      const d = new Date(`${spaced[1]}T${spaced[2]}:${spaced[3]}:${sec}`);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) {
+      throw new BadRequestException({
+        code: '40001',
+        message: 'recordedAt 格式应为 YYYY-MM-DD HH:mm:ss 或 ISO 时间',
+      });
+    }
+    return d;
+  }
+
   private assertRecordedInRange(
     journey: Journey,
     recordedAt: Date,
@@ -697,7 +844,7 @@ export class RecordingService {
 
   private assertRecordNotEmpty(opts: {
     content?: string | null;
-    images?: string[];
+    mediaIds?: string[];
     audioUrl?: string | null;
     audios?: Array<{ url: string }> | null;
     hasExistingPhoto?: boolean;
@@ -707,8 +854,8 @@ export class RecordingService {
   }) {
     const hasText = Boolean(opts.content?.trim());
     const hasImage =
-      (opts.images && opts.images.length > 0) ||
-      (!opts.clearingImages && opts.hasExistingPhoto && opts.images === undefined);
+      (opts.mediaIds && opts.mediaIds.length > 0) ||
+      (!opts.clearingImages && opts.hasExistingPhoto && opts.mediaIds === undefined);
     const hasAudiosArray =
       opts.audios !== undefined && opts.audios !== null && opts.audios.length > 0;
     const hasAudio =
@@ -801,19 +948,19 @@ export class RecordingService {
 
     this.assertRecordNotEmpty({
       content: dto.content !== undefined ? dto.content : entry.content,
-      images: dto.images,
+      mediaIds: dto.mediaIds,
       audioUrl: dto.audioUrl,
       audios: patchAudios,
       hasExistingPhoto: photos.length > 0,
       hasExistingVoice: voiceList.length > 0,
-      clearingImages: dto.images !== undefined && dto.images.length === 0,
+      clearingImages: dto.mediaIds !== undefined && dto.mediaIds.length === 0,
       clearingAudio,
     });
 
-    if (dto.images && dto.images.length > 9) {
+    if (dto.mediaIds && dto.mediaIds.length > 20) {
       throw new BadRequestException({
         code: '40003',
-        message: '图片最多 9 张，单张不超过 5MB',
+        message: '媒体最多 20 个',
       });
     }
     if (dto.audioDuration != null && dto.audioDuration > 300) {
@@ -834,12 +981,19 @@ export class RecordingService {
     }
 
     if (dto.recordedAt !== undefined) {
-      const at = new Date(dto.recordedAt);
+      const at = this.parseRecordedAt(dto.recordedAt);
       this.assertRecordedInRange(journey, at);
       entry.recordedAt = at;
     }
     if (dto.dayIndex !== undefined) entry.dayIndex = dto.dayIndex;
     if (dto.content !== undefined) entry.content = dto.content ?? undefined;
+
+    if (dto.tags !== undefined) {
+      const next = { ...(entry.payload ?? {}) };
+      if (dto.tags?.length) next.tags = dto.tags;
+      else delete next.tags;
+      entry.payload = next;
+    }
 
     if (
       dto.audioDuration != null ||
@@ -858,7 +1012,7 @@ export class RecordingService {
     }
 
     await this.dataSource.transaction(async (manager) => {
-      if (dto.images !== undefined) {
+      if (dto.mediaIds !== undefined) {
         const existingPhotos = await manager.find(Media, {
           where: { ownerType: 'entry', ownerId: entry.id, kind: 'image' },
         });
@@ -866,40 +1020,31 @@ export class RecordingService {
           where: { ownerType: 'entry', ownerId: entry.id, kind: 'photo' },
         });
         const existing = [...existingPhotos, ...legacyPhotos];
+
         const keepIds = new Set<string>();
-        for (let i = 0; i < dto.images.length; i++) {
-          const url = dto.images[i];
-          const key = storageKeyFromMediaUrl(url);
-          const found = existing.find(
-            (m) =>
-              m.url === url ||
-              (!!key && (m.storageKey === key || (m.url || '').includes(key))),
-          );
-          if (found) {
-            found.url = url;
-            found.storageKey = found.storageKey || key;
-            found.kind = 'image';
-            found.sortOrder = i;
-            found.status = 'active';
-            await manager.save(found);
-            keepIds.add(found.id);
-            continue;
+        if (dto.mediaIds.length) {
+          const rows = await manager.find(Media, {
+            where: { id: In(dto.mediaIds), createdBy: userId },
+          });
+          const found = new Set(rows.map((r) => r.id));
+          const missing = dto.mediaIds.filter((id) => !found.has(id));
+          if (missing.length) {
+            throw new BadRequestException(
+              `media not found: ${missing.join(', ')}`,
+            );
           }
-          await manager.save(
-            manager.create(Media, {
-              ownerType: 'entry',
-              ownerId: entry.id,
-              kind: 'image',
-              url,
-              storageKey: key,
-              mime: 'image/jpeg',
-              sizeBytes: 0,
-              sortOrder: i,
-              status: 'active',
-              createdBy: userId,
-              driver: 'local',
-            }),
-          );
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (row.ownerId && row.ownerId !== entry.id) {
+              throw new BadRequestException(
+                `media ${row.id} already linked to another entry`,
+              );
+            }
+            row.ownerId = entry.id;
+            row.sortOrder = i;
+            await manager.save(row);
+            keepIds.add(row.id);
+          }
         }
         const toRemove = existing.filter((m) => !keepIds.has(m.id));
         if (toRemove.length) await manager.remove(toRemove);
@@ -954,34 +1099,41 @@ export class RecordingService {
         if (toRemove.length) await manager.remove(toRemove);
       }
 
-      if (dto.locationTag !== undefined) {
+      if (dto.location !== undefined) {
         let loc = await manager.findOne(Location, {
           where: { entryId: entry.id },
         });
-        if (dto.locationTag === null) {
+        if (dto.location === null) {
           if (loc) await manager.remove(loc);
+          // 同步内存引用：避免 save(entry) 级联把已删除的定位再插回
+          entry.location = null;
         } else {
           if (loc) {
-            loc.name = dto.locationTag.name;
-            if (dto.locationTag.lat != null) loc.lat = dto.locationTag.lat;
-            if (dto.locationTag.lng != null) loc.lng = dto.locationTag.lng;
+            loc.name = dto.location.name;
+            if (dto.location.lat != null) loc.lat = dto.location.lat;
+            if (dto.location.lng != null) loc.lng = dto.location.lng;
             await manager.save(loc);
           } else {
-            await manager.save(
-              manager.create(Location, {
-                entryId: entry.id,
-                name: dto.locationTag.name,
-                lat: dto.locationTag.lat ?? 0,
-                lng: dto.locationTag.lng ?? 0,
-              }),
-            );
+            loc = manager.create(Location, {
+              entryId: entry.id,
+              name: dto.location.name,
+              lat: dto.location.lat ?? 0,
+              lng: dto.location.lng ?? 0,
+            });
+            await manager.save(loc);
           }
+          // 同步内存引用：避免 save(entry) 逆侧级联把新定位的 entryId 置空
+          entry.location = loc;
         }
       }
 
       const expenseLines = this.resolvePatchExpenseLines(dto);
       if (expenseLines !== undefined) {
         await this.replaceExpenses(manager, entry.id, expenseLines);
+      }
+
+      if (dto.city !== undefined) {
+        entry.city = dto.city ?? null;
       }
 
       const nextExpenses =
@@ -995,17 +1147,18 @@ export class RecordingService {
       entry.type = inferRecordType({
         content: entry.content,
         media: [
-          ...(dto.images ?? photos.map(() => ({ kind: 'photo' as const }))).map(
-            () => ({ kind: 'photo' as const }),
+          ...(dto.mediaIds !== undefined
+            ? (dto.mediaIds.length > 0 ? [{ kind: 'photo' as const }] : [])
+            : photos.map(() => ({ kind: 'photo' as const }))
           ),
           ...(patchAudios !== undefined
             ? patchAudios.map(() => ({ kind: 'voice' as const }))
             : voiceList.map(() => ({ kind: 'voice' as const }))),
         ],
         location:
-          dto.locationTag === null
+          dto.location === null
             ? undefined
-            : dto.locationTag ?? entry.location,
+            : dto.location ?? entry.location,
         expenses: nextExpenses,
         expense: nextExpenses[0],
       });
@@ -1042,16 +1195,6 @@ export class RecordingService {
     await this.requireOwnedJourney(userId, entry.journeyId);
     await this.entries.remove(entry);
     return { deleted: true, id: recordId };
-  }
-
-  async removeEntry(userId: string, journeyId: string, entryId: string) {
-    await this.requireOwnedJourney(userId, journeyId);
-    const entry = await this.entries.findOne({
-      where: { id: entryId, journeyId },
-    });
-    if (!entry) throw new NotFoundException('entry not found');
-    await this.entries.remove(entry);
-    return { deleted: true, id: entryId };
   }
 
   async removeEntries(

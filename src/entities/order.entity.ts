@@ -60,6 +60,6 @@ export class Order {
   @Column({ type: 'varchar', length: 64, nullable: true })
   refundId?: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

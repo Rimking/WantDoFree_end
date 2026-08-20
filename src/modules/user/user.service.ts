@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../common/datetime.util';
+
 import {
   BadRequestException,
   Injectable,
@@ -17,7 +19,6 @@ import { MemberBenefitService } from '../membership/member-benefit.service';
 import {
   AvatarPresignDto,
   PatchUserProfileDto,
-  UpdateProfileDto,
   UpsertBudgetDto,
 } from './user.dto';
 import {
@@ -89,6 +90,8 @@ export class UserService implements OnModuleInit {
       cityCode: u.cityCode ?? null,
       departureCity: u.departureCity ?? null,
       bio: u.bio ?? null,
+      createdAt: formatDateTime(u.createdAt),
+      updatedAt: formatDateTime(u.updatedAt),
       memberLevel: this.memberLevel(u.plan),
       identities: extra?.identities ?? [],
       stats: {
@@ -113,30 +116,13 @@ export class UserService implements OnModuleInit {
     });
   }
 
-  async updateProfile(id: string, dto: UpdateProfileDto) {
-    const u = await this.users.findOne({ where: { id } });
-    if (!u) throw new NotFoundException('user not found');
-    const nick = dto.nick ?? dto.nickname;
-    if (nick !== undefined) {
-      const v = validateNickname(nick);
-      if (!v.ok) {
-        throw new BadRequestException({ code: v.code, message: v.message });
-      }
-      u.nick = v.value;
-    }
-    const avatar = dto.avatarUrl ?? dto.avatar;
-    if (avatar !== undefined) u.avatar = avatar;
-    const saved = await this.users.save(u);
-    return this.toLegacyUserResponse(saved);
-  }
-
   async getBudget(userId: string, year?: number) {
     const y = year ?? new Date().getFullYear();
     const row = await this.budgets.findOne({ where: { userId, year: y } });
     return {
       year: y,
       amountCent: row?.amountCent ?? 0,
-      updatedAt: row?.updatedAt ?? null,
+      updatedAt: formatDateTime(row?.updatedAt),
     };
   }
 
@@ -157,7 +143,7 @@ export class UserService implements OnModuleInit {
     return {
       year: saved.year,
       amountCent: saved.amountCent,
-      updatedAt: saved.updatedAt,
+      updatedAt: formatDateTime(saved.updatedAt),
     };
   }
 
@@ -193,7 +179,7 @@ export class UserService implements OnModuleInit {
         footprintCities,
         tripCount,
       },
-      updatedAt: u.updatedAt,
+      updatedAt: formatDateTime(u.updatedAt),
     };
   }
 
@@ -309,7 +295,7 @@ export class UserService implements OnModuleInit {
     await this.users.save(u);
     const profile = await this.getProfile(userId);
     return {
-      updatedAt: profile.updatedAt,
+      updatedAt: formatDateTime(profile.updatedAt),
       profile,
     };
   }

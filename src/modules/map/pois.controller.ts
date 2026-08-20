@@ -2,9 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
-  Get,
   Post,
-  Query,
   UseGuards,
 } from '@nestjs/common';
 import { MapService } from './map.service';
@@ -98,6 +96,10 @@ class PoisReverseBodyDto {
   getPoi?: boolean;
 }
 
+/**
+ * POI 搜索 API（新契约：POST + body）。
+ * 旧 GET nearby/search/reverse-geocode 兼容端点已于 2026-08-20 下线。
+ */
 @Controller('pois')
 @UseGuards(JwtAuthGuard)
 export class PoisController {
@@ -137,66 +139,5 @@ export class PoisController {
       body.lng,
       Boolean(body.getPoi),
     );
-  }
-
-  /** 兼容旧 GET */
-  @Get('nearby')
-  nearby(
-    @Query('lat') lat: string,
-    @Query('lng') lng: string,
-    @Query('radius') radius?: string,
-    @Query('keyword') keyword?: string,
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
-  ) {
-    if (lat == null || lng == null) {
-      throw new BadRequestException('lat and lng required');
-    }
-    return this.map.nearby({
-      lat: Number(lat),
-      lng: Number(lng),
-      radius: radius != null ? Number(radius) : 2000,
-      keyword: keyword?.trim() || undefined,
-      page: page != null ? Number(page) : 1,
-      pageSize: pageSize != null ? Number(pageSize) : 20,
-    });
-  }
-
-  @Get('reverse-geocode')
-  reverse(
-    @Query('lat') lat: string,
-    @Query('lng') lng: string,
-    @Query('getPoi') getPoi?: string,
-  ) {
-    if (lat == null || lng == null) {
-      throw new BadRequestException('lat and lng required');
-    }
-    return this.map.reverseGeocodeList(
-      Number(lat),
-      Number(lng),
-      getPoi === '1' || getPoi === 'true',
-    );
-  }
-
-  @Get('search')
-  search(
-    @Query('keyword') keyword: string,
-    @Query('city') city?: string,
-    @Query('lat') lat?: string,
-    @Query('lng') lng?: string,
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
-  ) {
-    if (!keyword?.trim()) {
-      throw new BadRequestException('keyword required');
-    }
-    return this.map.searchPoiList({
-      keyword: keyword.trim(),
-      city: city?.trim(),
-      lat: lat != null ? Number(lat) : undefined,
-      lng: lng != null ? Number(lng) : undefined,
-      page: page != null ? Number(page) : 1,
-      pageSize: pageSize != null ? Number(pageSize) : 20,
-    });
   }
 }

@@ -32,9 +32,9 @@ export class YearBudget {
   @Column({ type: 'int', default: 0, comment: '年度预算(分)' })
   amountCent: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 }

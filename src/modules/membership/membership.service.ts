@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../common/datetime.util';
+
 import {
   BadRequestException,
   ForbiddenException,
@@ -294,7 +296,7 @@ export class MembershipService {
     return {
       orderNo: order.id,
       status: order.status,
-      paidAt: order.paidAt ?? null,
+      paidAt: formatDateTime(order.paidAt),
       planCode: order.planCode ?? null,
       amountCent: order.amountCent,
       periodDays: order.periodDays ?? null,

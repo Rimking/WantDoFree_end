@@ -12,8 +12,9 @@ export class PrepareMediaDto {
   @IsIn([...MEDIA_OWNER_TYPES])
   ownerType: (typeof MEDIA_OWNER_TYPES)[number];
 
+  @IsOptional()
   @IsString()
-  ownerId: string;
+  ownerId?: string;
 
   @IsString()
   kind: string;

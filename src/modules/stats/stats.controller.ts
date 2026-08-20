@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { StatsService } from './stats.service';
 import { StatsRangeQueryDto } from './stats.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -7,7 +7,7 @@ import { StatsRateLimitGuard } from './stats-rate-limit.guard';
 
 /**
  * 统计 API：有参 POST；storage 无参可 GET。
- * 旧 GET + query 保留一期兼容。
+ * 旧 GET + query 兼容端点已于 2026-08-20 下线。
  */
 @Controller('stats')
 @UseGuards(JwtAuthGuard, StatsRateLimitGuard)
@@ -100,47 +100,5 @@ export class StatsController {
   @Post('storage')
   storagePost(@CurrentUser() u: { id: string }) {
     return this.stats.storage(u.id);
-  }
-
-  // ─── 兼容 GET + query ───────────────────────────────────
-
-  @Get('overview')
-  overview(
-    @CurrentUser() u: { id: string },
-    @Query() query: StatsRangeQueryDto,
-  ) {
-    return this.stats.overview(u.id, query);
-  }
-
-  @Get('expenses')
-  expenses(
-    @CurrentUser() u: { id: string },
-    @Query() query: StatsRangeQueryDto,
-  ) {
-    return this.stats.expenseStats(u.id, query);
-  }
-
-  @Get('plans')
-  plans(
-    @CurrentUser() u: { id: string },
-    @Query() query: StatsRangeQueryDto,
-  ) {
-    return this.stats.plans(u.id, query);
-  }
-
-  @Get('journeys')
-  journeys(
-    @CurrentUser() u: { id: string },
-    @Query() query: StatsRangeQueryDto,
-  ) {
-    return this.stats.journeysStats(u.id, query);
-  }
-
-  @Get('content')
-  content(
-    @CurrentUser() u: { id: string },
-    @Query() query: StatsRangeQueryDto,
-  ) {
-    return this.stats.content(u.id, query);
   }
 }

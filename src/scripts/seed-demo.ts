@@ -23,7 +23,6 @@ import { Draft } from '../entities/draft.entity';
 import { Order } from '../entities/order.entity';
 import { TravelIdentityDict } from '../entities/travel-identity-dict.entity';
 import { UserIdentity } from '../entities/user-identity.entity';
-import { Destination } from '../entities/destination.entity';
 import { ChecklistItem } from '../entities/checklist-item.entity';
 import { UserStatsSnapshot } from '../entities/user-stats-snapshot.entity';
 import { MemberPlan } from '../entities/member-plan.entity';
@@ -156,7 +155,6 @@ async function main() {
       Order,
       TravelIdentityDict,
       UserIdentity,
-      Destination,
       ChecklistItem,
       UserStatsSnapshot,
       MemberPlan,
@@ -173,7 +171,7 @@ async function main() {
 
   await seedJourneys(ctx);
   await seedPlans(ctx);
-  await seedDestinationsAndChecklist(ctx);
+  await seedChecklist(ctx);
   const entryMap = await seedEntries(ctx, buildAllEntries());
   console.log(`✓ ${entryMap.size} entries with children`);
 
@@ -218,7 +216,6 @@ async function wipeDemo(ds: DataSource) {
     );
     await ds.query(`DELETE FROM entries WHERE journeyId IN (${ph})`, jids);
     await ds.query(`DELETE FROM journey_plans WHERE journeyId IN (${ph})`, jids);
-    await ds.query(`DELETE FROM destinations WHERE journeyId IN (${ph})`, jids);
     await ds.query(`DELETE FROM checklist_items WHERE journeyId IN (${ph})`, jids);
     await ds.query(`DELETE FROM journeys WHERE id IN (${ph})`, jids);
   }
@@ -339,7 +336,6 @@ function repos(ds: DataSource) {
     budgets: ds.getRepository(YearBudget),
     drafts: ds.getRepository(Draft),
     orders: ds.getRepository(Order),
-    destinations: ds.getRepository(Destination),
     checklist: ds.getRepository(ChecklistItem),
   };
 }
@@ -588,36 +584,18 @@ const POI_COORDS: Record<string, { lat: number; lng: number; address?: string }>
   双廊: { lat: 25.909, lng: 100.197, address: '云南省大理市双廊镇' },
 };
 
-/** 从 plan JSON 同步到 destinations / checklist_items 正式表 */
-async function seedDestinationsAndChecklist(ctx: Ctx) {
+/** 从 plan JSON 同步 checklist_items 正式表；并回写 plan.places 坐标供地图打点 */
+async function seedChecklist(ctx: Ctx) {
   const plans = await ctx.plans.find();
   for (const plan of plans) {
-    let order = 0;
+    // 回写 plan.places 坐标（POI 表仅含具体景点，不含城市级无坐标意图）
     for (const p of plan.places ?? []) {
       const poi = POI_COORDS[p.name];
-      await ctx.destinations.save(
-        ctx.destinations.create({
-          journeyId: plan.journeyId,
-          name: p.name,
-          note: p.note ?? null,
-          images: p.coverUrl ? [p.coverUrl] : [],
-          category: 'SIGHT',
-          isMust: order === 0,
-          dayIndex: order < 2 ? order + 1 : null,
-          sortOrder: order,
-          address: poi?.address ?? null,
-          latitude: poi ? String(poi.lat) : null,
-          longitude: poi ? String(poi.lng) : null,
-        }),
-      );
-      // 回写 plan.places 坐标，供 GET /plan 地图打点
-      (p as any).lat = poi?.lat ?? null;
-      (p as any).lng = poi?.lng ?? null;
-      (p as any).locationName = poi?.address ?? p.name;
+      if (!poi) continue;
+      (p as any).lat = poi.lat ?? null;
+      (p as any).lng = poi.lng ?? null;
+      (p as any).locationName = poi.address ?? p.name;
       (p as any).category = 'SIGHT';
-      (p as any).dayIndex = order < 2 ? order + 1 : null;
-      (p as any).images = p.coverUrl ? [p.coverUrl] : [];
-      order += 1;
     }
     await ctx.plans.save(plan);
     let cOrder = 0;
@@ -634,7 +612,7 @@ async function seedDestinationsAndChecklist(ctx: Ctx) {
       );
     }
   }
-  console.log('✓ destinations + checklist_items（含国内经纬度）');
+  console.log('✓ checklist_items（含 plan 坐标回写）');
 }
 
 function buildAllEntries(): SeedEntry[] {
@@ -1025,7 +1003,7 @@ async function seedGuidesFromDb(ctx: Ctx) {
           },
         })
       : [];
-    const mediaByEntry = new Map<string, typeof mediaRows>();
+    const mediaByEntry = new Map<string | null, typeof mediaRows>();
     for (const m of mediaRows) {
       const list = mediaByEntry.get(m.ownerId) ?? [];
       list.push(m);

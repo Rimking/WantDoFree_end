@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../common/datetime.util';
+
 import {
   BadRequestException,
   ConflictException,
@@ -45,8 +47,8 @@ export class ChecklistService {
       remindBeforeDays: row.remindBeforeDays ?? null,
       sortOrder: row.sortOrder,
       isChecked: !!row.isChecked,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
+      createdAt: formatDateTime(row.createdAt),
+      updatedAt: formatDateTime(row.updatedAt),
     };
   }
 

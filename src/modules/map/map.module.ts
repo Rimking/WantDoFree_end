@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MapService } from './map.service';
-import { MapController } from './map.controller';
 import { PoisController } from './pois.controller';
 
 @Module({
-  controllers: [MapController, PoisController],
+  controllers: [PoisController],
   providers: [MapService],
   exports: [MapService],
 })

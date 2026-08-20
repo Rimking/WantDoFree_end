@@ -5,7 +5,6 @@ import { Entry } from '../../entities/entry.entity';
 import { Expense } from '../../entities/expense.entity';
 import { Location } from '../../entities/location.entity';
 import { Media } from '../../entities/media.entity';
-import { Destination } from '../../entities/destination.entity';
 import { ChecklistItem } from '../../entities/checklist-item.entity';
 import { Guide } from '../../entities/guide.entity';
 import { User } from '../../entities/user.entity';
@@ -22,7 +21,6 @@ import { StatsRateLimitGuard } from './stats-rate-limit.guard';
       Expense,
       Location,
       Media,
-      Destination,
       ChecklistItem,
       Guide,
       User,

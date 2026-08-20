@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { IsString, Length } from 'class-validator';
 import { LocationService } from './location.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -10,6 +10,10 @@ class JourneyLocationsClearBodyDto {
   journeyId: string;
 }
 
+/**
+ * 位置清理 API（新契约：POST + body）。
+ * 旧 DELETE 兼容端点已于 2026-08-20 下线。
+ */
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class LocationController {
@@ -26,15 +30,5 @@ export class LocationController {
     @Body() body: JourneyLocationsClearBodyDto,
   ) {
     return this.location.clearByJourney(u.id, body.journeyId);
-  }
-
-  @Delete('me/locations')
-  clearMine(@CurrentUser() u: { id: string }) {
-    return this.location.clearByUser(u.id);
-  }
-
-  @Delete('journeys/:id/locations')
-  clearJourney(@CurrentUser() u: { id: string }, @Param('id') id: string) {
-    return this.location.clearByJourney(u.id, id);
   }
 }

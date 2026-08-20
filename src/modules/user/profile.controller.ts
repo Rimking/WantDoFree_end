@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { UserService } from './user.service';
 import {
   AvatarPresignDto,
@@ -11,6 +11,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 /**
  * 个人信息编辑页 API（需求：渡清川_个人信息编辑页）
  * 路径前缀：/dream/v1/user
+ * PATCH /user/profile 兼容端点已于 2026-08-20 下线，统一 POST /user/profile/update。
  */
 @Controller('user')
 @UseGuards(JwtAuthGuard)
@@ -24,14 +25,6 @@ export class ProfileController {
 
   @Post('profile/update')
   updateProfilePost(
-    @CurrentUser() u: { id: string },
-    @Body() dto: PatchUserProfileDto,
-  ) {
-    return this.user.patchProfile(u.id, dto);
-  }
-
-  @Patch('profile')
-  patchProfile(
     @CurrentUser() u: { id: string },
     @Body() dto: PatchUserProfileDto,
   ) {

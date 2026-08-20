@@ -13,13 +13,6 @@ import {
   ValidateIf,
 } from 'class-validator';
 
-export class UpdateProfileDto {
-  @IsOptional() @IsString() nick?: string;
-  @IsOptional() @IsString() nickname?: string;
-  @IsOptional() @IsString() avatar?: string;
-  @IsOptional() @IsString() avatarUrl?: string;
-}
-
 export class UpsertBudgetDto {
   @IsInt() @Min(2000) @Max(2100) year: number;
   @IsInt() @Min(0) amountCent: number;

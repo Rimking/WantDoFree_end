@@ -52,9 +52,9 @@ export class MemberPlan {
   @Column({ type: 'boolean', default: true })
   active: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 }

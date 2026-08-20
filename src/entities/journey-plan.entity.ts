@@ -12,6 +12,7 @@ import { Journey } from './journey.entity';
 export type PlanPlaceIntent = 'wish' | 'planned' | 'must';
 
 export type PlanPlace = {
+  /** @deprecated 老数据留存；新建地点由服务端生成 */
   clientId: string;
   name: string;
   note?: string;
@@ -20,14 +21,28 @@ export type PlanPlace = {
   lat?: number | null;
   /** 经度 */
   lng?: number | null;
-  /** 地址/位置文案 */
+  /** @deprecated 用 name 替代 */
   locationName?: string | null;
-  /** 分类：SIGHT/FOOD/STAY/SHOPPING/OTHER */
+  /** @deprecated 合并到 tags */
   category?: string | null;
+  /**
+   * 由 recordedAt 相对旅程 startDate 派生（第几天，1-based）。
+   * 写接口不必传。
+   */
   dayIndex?: number | null;
-  /** 想去 / 已定 / 必去 */
+  /**
+   * 关联日期 + 预计时间拼好的时间（与记录 recordedAt 同一口径）。
+   * 格式：`YYYY-MM-DD HH:mm:ss`
+   */
+  visitTime?: string | null;
+  /** @deprecated 合并到 tags */
   intent?: PlanPlaceIntent | null;
+  /** @deprecated 用 mediaIds 替代 */
   images?: string[];
+  /** 标签数组：合并 category + intent；如 ["sight", "must"] */
+  tags?: string[];
+  /** 已上传媒体 id 列表 */
+  mediaIds?: string[];
   sortOrder?: number;
 };
 
@@ -60,9 +75,9 @@ export class JourneyPlan {
   @Column({ type: 'int', default: 0 })
   budgetEstimate: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 }

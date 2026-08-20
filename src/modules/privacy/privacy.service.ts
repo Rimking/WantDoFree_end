@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../common/datetime.util';
+
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -70,7 +72,7 @@ export class PrivacyService {
             clientId: e.clientId,
             syncVersion: e.syncVersion,
             payload: e.payload,
-            createdAt: e.createdAt,
+            createdAt: formatDateTime(e.createdAt),
             location: e.location
               ? {
                   lat: e.location.lat,
@@ -106,7 +108,7 @@ export class PrivacyService {
         nick: user.nick,
         avatar: user.avatar,
         plan: user.plan,
-        createdAt: user.createdAt,
+        createdAt: formatDateTime(user.createdAt),
       },
       journeys: packs,
     };

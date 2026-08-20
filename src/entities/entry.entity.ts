@@ -58,10 +58,14 @@ export class Entry {
   @Column({ type: 'int', nullable: true })
   dayIndex?: number | null;
 
-  @CreateDateColumn()
+  /** 记录级城市归属软标签，与定位坐标解耦（纯文本记录也可手动填） */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  city?: string | null;
+
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 
   /**
@@ -70,7 +74,7 @@ export class Entry {
   media?: Media[];
 
   @OneToOne(() => Location, (l) => l.entry, { cascade: true })
-  location?: Location;
+  location?: Location | null;
 
   /** 一条记录可挂多笔花费 */
   @OneToMany(() => Expense, (e) => e.entry)

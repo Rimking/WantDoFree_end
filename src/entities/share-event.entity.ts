@@ -49,6 +49,6 @@ export class ShareEvent {
   @Column({ nullable: true, length: 36 })
   viewerId?: string;
 
-  @CreateDateColumn({ name: 'createdAt' })
+  @CreateDateColumn({ name: 'createdAt', type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   sharedAt: Date;
 }

@@ -15,14 +15,13 @@ import { QuotaModule } from './modules/quota/quota.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { PrivacyModule } from './modules/privacy/privacy.module';
 import { MapModule } from './modules/map/map.module';
-import { DraftModule } from './modules/draft/draft.module';
-import { DestinationModule } from './modules/destination/destination.module';
 import { ChecklistModule } from './modules/checklist/checklist.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { MembershipModule } from './modules/membership/membership.module';
 import { MemberBenefitModule } from './modules/membership/member-benefit.module';
 import { ShareModule } from './modules/share/share.module';
 import { InviteModule } from './modules/invite/invite.module';
+import { FootprintModule } from './modules/footprint/footprint.module';
 
 @Module({
   imports: [
@@ -42,14 +41,13 @@ import { InviteModule } from './modules/invite/invite.module';
     PaymentModule,
     PrivacyModule,
     MapModule,
-    DraftModule,
-    DestinationModule,
     ChecklistModule,
     StatsModule,
     MembershipModule,
     MemberBenefitModule,
     ShareModule,
     InviteModule,
+    FootprintModule,
   ],
 })
 export class AppModule {}

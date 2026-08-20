@@ -33,6 +33,6 @@ export class Location {
   @Column({ type: 'text', nullable: true, comment: '密文(PIPL)' })
   encryptedPoly?: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

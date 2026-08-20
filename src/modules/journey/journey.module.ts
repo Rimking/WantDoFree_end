@@ -5,7 +5,6 @@ import { JourneyPlan } from '../../entities/journey-plan.entity';
 import { Expense } from '../../entities/expense.entity';
 import { Entry } from '../../entities/entry.entity';
 import { Location } from '../../entities/location.entity';
-import { Destination } from '../../entities/destination.entity';
 import { ChecklistItem } from '../../entities/checklist-item.entity';
 import { Guide } from '../../entities/guide.entity';
 import { Share } from '../../entities/share.entity';
@@ -26,7 +25,6 @@ import { GuideModule } from '../guide/guide.module';
       Expense,
       Entry,
       Location,
-      Destination,
       ChecklistItem,
       Guide,
       Share,

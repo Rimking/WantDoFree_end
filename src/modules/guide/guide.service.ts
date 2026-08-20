@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../common/datetime.util';
+
 import {
   BadRequestException,
   ForbiddenException,
@@ -9,10 +11,8 @@ import { Repository } from 'typeorm';
 import { Journey } from '../../entities/journey.entity';
 import { Entry } from '../../entities/entry.entity';
 import { Guide } from '../../entities/guide.entity';
-import { ShareEvent } from '../../entities/share-event.entity';
 import {
   normalizeExpenseCategory,
-  normalizeShareChannel,
   normalizeThemeTag,
   themeLabelOf,
 } from '../../common/enums/catalog';
@@ -33,7 +33,7 @@ type GuidePayload = {
     content?: string;
     cover?: string;
     mediaUrl?: string;
-    createdAt: Date;
+    createdAt: string | null;
   }>;
   places: Array<{ name?: string; lat?: number; lng?: number }>;
   cities: string[];
@@ -67,8 +67,6 @@ export class GuideService {
     @InjectRepository(Journey) private readonly journeys: Repository<Journey>,
     @InjectRepository(Entry) private readonly entries: Repository<Entry>,
     @InjectRepository(Guide) private readonly guides: Repository<Guide>,
-    @InjectRepository(ShareEvent)
-    private readonly shareEvents: Repository<ShareEvent>,
     private readonly mediaService: MediaService,
   ) {}
 
@@ -200,12 +198,19 @@ export class GuideService {
   /**
    * 单查 / 聚合用：不抛 404；附带 canGenerate。
    * 响应模块 key = guide
+   * @param withEligibility false 时精简：仅 exists + 攻略本体（详情聚合用；
+   *   资格信息前端走独立 guideApi.check 获取）
    */
-  async getForAggregate(userId: string, journeyId: string) {
+  async getForAggregate(
+    userId: string,
+    journeyId: string,
+    withEligibility = true,
+  ) {
     await this.requireOwnedJourney(userId, journeyId);
     const guide = await this.guides.findOne({ where: { journeyId } });
-    const eligibility = await this.checkEligibility(userId, journeyId);
     if (!guide || !guide.payload) {
+      if (!withEligibility) return { exists: false };
+      const eligibility = await this.checkEligibility(userId, journeyId);
       return {
         exists: false,
         canGenerate: eligibility.canGenerate,
@@ -213,6 +218,10 @@ export class GuideService {
         stats: eligibility.stats,
       };
     }
+    if (!withEligibility) {
+      return { exists: true, ...this.toGuideResponse(guide) };
+    }
+    const eligibility = await this.checkEligibility(userId, journeyId);
     return {
       exists: true,
       canGenerate: true,
@@ -238,132 +247,6 @@ export class GuideService {
       });
     }
     return { exists: true, ...this.toGuideResponse(guide) };
-  }
-
-  async recordShareEvent(
-    userId: string,
-    input: {
-      journeyId: string;
-      guideId?: string;
-      channel: string;
-      viewerId?: string;
-    },
-  ) {
-    await this.requireOwnedJourney(userId, input.journeyId);
-
-    const channel = normalizeShareChannel(input.channel);
-    if (!channel) {
-      throw new BadRequestException(`invalid channel: ${input.channel}`);
-    }
-
-    let guideId = input.guideId;
-    if (!guideId) {
-      const latest = await this.guides.findOne({
-        where: { journeyId: input.journeyId },
-        order: { createdAt: 'DESC' },
-      });
-      if (!latest) {
-        throw new NotFoundException({
-          code: 'GUIDE_NOT_FOUND',
-          exists: false,
-          message: 'guide not found for journey',
-        });
-      }
-      guideId = latest.id;
-    } else {
-      const guide = await this.guides.findOne({
-        where: { id: guideId, journeyId: input.journeyId },
-      });
-      if (!guide) {
-        throw new NotFoundException({
-          code: 'GUIDE_NOT_FOUND',
-          exists: false,
-          message: 'guide not found for journey',
-        });
-      }
-    }
-
-    const event = await this.shareEvents.save(
-      this.shareEvents.create({
-        journeyId: input.journeyId,
-        guideId,
-        channel,
-        sharerId: userId,
-        viewerId: input.viewerId,
-      }),
-    );
-
-    return {
-      id: event.id,
-      journeyId: event.journeyId,
-      guideId: event.guideId,
-      channel: event.channel,
-      sharerId: event.sharerId,
-      viewerId: event.viewerId ?? null,
-      sharedAt: event.sharedAt,
-    };
-  }
-
-  async attachViewer(userId: string, shareEventId: string, viewerId: string) {
-    const event = await this.shareEvents.findOne({
-      where: { id: shareEventId },
-    });
-    if (!event) throw new NotFoundException('share event not found');
-    // 仅分享者或旅程主人可回填 viewer
-    if (event.sharerId !== userId) {
-      await this.requireOwnedJourney(userId, event.journeyId);
-    }
-    if (event.viewerId && event.viewerId !== viewerId) {
-      return {
-        id: event.id,
-        viewerId: event.viewerId,
-        updated: false,
-      };
-    }
-    event.viewerId = viewerId;
-    await this.shareEvents.save(event);
-    return { id: event.id, viewerId: event.viewerId, updated: true };
-  }
-
-  async toggleFavorite(
-    userId: string,
-    guideId: string,
-    isFavorited?: boolean,
-  ) {
-    const guide = await this.guides.findOne({
-      where: { id: guideId },
-      relations: ['journey'],
-    });
-    if (!guide) throw new NotFoundException('guide not found');
-    if (guide.journey.userId !== userId) {
-      throw new ForbiddenException('guide does not belong to current user');
-    }
-    guide.isFavorited =
-      isFavorited !== undefined ? Boolean(isFavorited) : !guide.isFavorited;
-    await this.guides.save(guide);
-    return {
-      id: guide.id,
-      journeyId: guide.journeyId,
-      isFavorited: guide.isFavorited,
-    };
-  }
-
-  /** 按旅程收藏：无攻略时先自动生成 basic */
-  async favoriteByJourney(
-    userId: string,
-    journeyId: string,
-    isFavorited?: boolean,
-  ) {
-    await this.requireOwnedJourney(userId, journeyId);
-    let guide = await this.guides.findOne({ where: { journeyId } });
-    if (!guide || !guide.payload) {
-      const generated = await this.generate(userId, journeyId, {
-        templateId: 'basic',
-      });
-      guide = await this.guides.findOne({ where: { id: generated.id } });
-      if (!guide) throw new NotFoundException('guide not found');
-    }
-    return this.toggleFavorite(userId, guide.id, isFavorited);
   }
 
   private nightsBetween(start: string, end: string) {
@@ -420,7 +303,7 @@ export class GuideService {
         content: e.content,
         cover: mediaUrl,
         mediaUrl,
-        createdAt: e.createdAt,
+        createdAt: formatDateTime(e.createdAt),
       };
     });
 
@@ -492,7 +375,6 @@ export class GuideService {
     return {
       id: guide.id,
       journeyId: guide.journeyId,
-      template: guide.template,
       templateId: guide.template,
       /** 产品名：游记；接口资源名仍为 guide */
       productName: '游记',
@@ -502,7 +384,6 @@ export class GuideService {
       cityCount: cities.length,
       cities,
       themeLabel: themeLabelOf(themeTags),
-      themeTags,
       highlights: payload?.highlights ?? [],
       coverUrl,
       cover: coverUrl,
@@ -510,7 +391,7 @@ export class GuideService {
       totalCostCent,
       totalExpense: totalCostCent,
       byCategory,
-      createdAt: guide.createdAt,
+      createdAt: formatDateTime(guide.createdAt),
     };
   }
 

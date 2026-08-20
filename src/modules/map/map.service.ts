@@ -84,31 +84,6 @@ export class MapService {
     return { list, total: total ?? list.length, provider: this.provider() };
   }
 
-  async searchPoi(
-    keyword: string,
-    lat?: number,
-    lng?: number,
-  ): Promise<{ provider: string; items: PoiItem[] }> {
-    const { list, provider } = await this.searchPoiList({
-      keyword,
-      lat,
-      lng,
-      page: 1,
-      pageSize: 10,
-    });
-    return {
-      provider,
-      items: list.map((p) => ({
-        id: p.id,
-        name: p.name,
-        address: p.address,
-        lat: p.latitude,
-        lng: p.longitude,
-        mock: p.mock,
-      })),
-    };
-  }
-
   async searchPoiList(opts: {
     keyword: string;
     city?: string;
@@ -308,25 +283,6 @@ export class MapService {
       };
     });
     return this.wrapList(items, Number(data?.count ?? items.length));
-  }
-
-  async reverseGeocode(
-    lat: number,
-    lng: number,
-  ): Promise<{
-    provider: string;
-    name: string;
-    address?: string;
-    mock?: boolean;
-  }> {
-    const list = await this.reverseGeocodeList(lat, lng, false);
-    const first = list.list[0];
-    return {
-      provider: list.provider,
-      name: first?.name ?? '附近地点',
-      address: first?.address,
-      mock: first?.mock,
-    };
   }
 
   async reverseGeocodeList(lat: number, lng: number, getPoi = false) {

@@ -10,7 +10,6 @@ import { Entry } from '../../entities/entry.entity';
 import { Expense } from '../../entities/expense.entity';
 import { Location } from '../../entities/location.entity';
 import { Media } from '../../entities/media.entity';
-import { Destination } from '../../entities/destination.entity';
 import { ChecklistItem } from '../../entities/checklist-item.entity';
 import { Guide } from '../../entities/guide.entity';
 import { User } from '../../entities/user.entity';
@@ -29,8 +28,6 @@ export class StatsService {
     @InjectRepository(Expense) private readonly expenses: Repository<Expense>,
     @InjectRepository(Location) private readonly locations: Repository<Location>,
     @InjectRepository(Media) private readonly media: Repository<Media>,
-    @InjectRepository(Destination)
-    private readonly destinations: Repository<Destination>,
     @InjectRepository(ChecklistItem)
     private readonly checklist: Repository<ChecklistItem>,
     @InjectRepository(Guide) private readonly guides: Repository<Guide>,
@@ -222,6 +219,72 @@ export class StatsService {
     this.applyEntryTime(qb as any, 'entry', startAt, endAt);
     const raw = await qb.getRawMany();
     return raw.map((r) => String(r.name).trim()).filter(Boolean);
+  }
+
+  /** 城市足迹 + 定位占比：entry.city 去重城市数 / 带 location 的 entry 占比（含时间范围） */
+  private async cityStats(
+    journeyIds: string[],
+    startAt: string | null,
+    endAt: string | null,
+  ) {
+    if (!journeyIds.length) {
+      return { cityFootprint: 0, locatedRatio: 0, recordCount: 0 };
+    }
+    const qb = this.entries
+      .createQueryBuilder('e')
+      .leftJoin('e.location', 'loc')
+      .select('e.city', 'city')
+      .addSelect('COUNT(DISTINCT e.id)', 'cnt')
+      .addSelect(
+        'COUNT(DISTINCT CASE WHEN loc.id IS NOT NULL THEN e.id END)',
+        'locatedCnt',
+      )
+      .where('e.journeyId IN (:...journeyIds)', { journeyIds })
+      .groupBy('e.city');
+    this.applyEntryTime(qb, 'e', startAt, endAt);
+    const rows = await qb.getRawMany();
+    const cities = new Set<string>();
+    let recordCount = 0;
+    let locatedCount = 0;
+    for (const r of rows) {
+      recordCount += Number(r.cnt) || 0;
+      locatedCount += Number(r.locatedCnt) || 0;
+      if (r.city != null && String(r.city).trim()) {
+        cities.add(String(r.city).trim());
+      }
+    }
+    return {
+      cityFootprint: cities.size,
+      locatedRatio:
+        recordCount > 0 ? Number((locatedCount / recordCount).toFixed(4)) : 0,
+      recordCount,
+    };
+  }
+
+  /** 各旅程 entry.city 去重城市集合（含时间范围） */
+  private async cityByJourney(
+    journeyIds: string[],
+    startAt: string | null,
+    endAt: string | null,
+  ) {
+    const map = new Map<string, Set<string>>();
+    if (!journeyIds.length) return map;
+    const qb = this.entries
+      .createQueryBuilder('e')
+      .select('e.journeyId', 'journeyId')
+      .addSelect('e.city', 'city')
+      .where('e.journeyId IN (:...journeyIds)', { journeyIds })
+      .andWhere("e.city IS NOT NULL AND TRIM(e.city) != ''")
+      .groupBy('e.journeyId')
+      .addGroupBy('e.city');
+    this.applyEntryTime(qb, 'e', startAt, endAt);
+    const raw = await qb.getRawMany();
+    for (const r of raw) {
+      const id = String(r.journeyId);
+      if (!map.has(id)) map.set(id, new Set());
+      map.get(id)!.add(String(r.city).trim());
+    }
+    return map;
   }
 
   private async computeStreak(userId: string, journeyIds: string[]) {
@@ -469,11 +532,11 @@ export class StatsService {
       return this.ok(
         {
           preTripDoneRate: 0,
-          destinationCoverage: 0,
-          planPlaces: 0,
-          visitedPlaces: 0,
-          planVsActualGap: 0,
+          cityFootprint: 0,
+          locatedRatio: 0,
+          recordCount: 0,
           budgetExecutionRate: null,
+          journeyRows: [],
         },
         { type: range.type, start: range.start, end: range.end },
       );
@@ -490,31 +553,16 @@ export class StatsService {
       ? Number((checked / checkRows.length).toFixed(4))
       : 0;
 
-    const destRows = await this.destinations
-      .createQueryBuilder('d')
-      .where('d.journeyId IN (:...journeyIds)', { journeyIds })
-      .andWhere('d.deletedAt IS NULL')
-      .getMany();
-    const planPlaces = destRows.length;
-    const destNames = new Set(destRows.map((d) => d.name.trim()));
-
-    const placeNames = await this.distinctPlaceNames(
-      userId,
+    const city = await this.cityStats(
       journeyIds,
       range.startAt,
       range.endAt,
     );
-    const visitedPlaces = placeNames.filter((n) => destNames.has(n)).length;
-    // 若目的地尚未建表关联名，回退为有定位的去重地点数
-    const visited =
-      planPlaces > 0 ? visitedPlaces : placeNames.length;
-    const destinationCoverage =
-      planPlaces > 0
-        ? Number((visited / planPlaces).toFixed(4))
-        : 0;
-
-    const planVsActualGap =
-      planPlaces > 0 ? planPlaces - visited : null;
+    const cityMap = await this.cityByJourney(
+      journeyIds,
+      range.startAt,
+      range.endAt,
+    );
 
     let spent = 0;
     const qb = this.expenses
@@ -537,8 +585,7 @@ export class StatsService {
       name: string;
       prepDone: number;
       prepTotal: number;
-      coverDone: number;
-      coverTotal: number;
+      cityCount: number;
       score: number;
     }> = [];
 
@@ -546,25 +593,15 @@ export class StatsService {
       const checkItems = checkRows.filter((c) => c.journeyId === j.id);
       const prepTotal = checkItems.length;
       const prepDone = checkItems.filter((c) => c.isChecked).length;
-      const destNames = new Set(
-        destRows.filter((d) => d.journeyId === j.id).map((d) => d.name.trim()),
-      );
-      const coverTotal = destNames.size;
-      const thisPlaces =
-        coverTotal > 0
-          ? await this.distinctPlaceNames(userId, [j.id], range.startAt, range.endAt)
-          : [];
-      const coverDone = coverTotal > 0 ? thisPlaces.filter((n) => destNames.has(n)).length : 0;
+      const cityCount = cityMap.get(j.id)?.size ?? 0;
       const prepRate = prepTotal > 0 ? prepDone / prepTotal : 1;
-      const coverRate = coverTotal > 0 ? coverDone / coverTotal : 1;
-      const score = Math.round(((prepRate + coverRate) / 2) * 100);
+      const score = Math.round(prepRate * 100);
       journeyRows.push({
         journeyId: j.id,
         name: j.title,
         prepDone,
         prepTotal,
-        coverDone,
-        coverTotal,
+        cityCount,
         score,
       });
     }
@@ -572,10 +609,9 @@ export class StatsService {
     return this.ok(
       {
         preTripDoneRate,
-        destinationCoverage,
-        planPlaces,
-        visitedPlaces: visited,
-        planVsActualGap,
+        cityFootprint: city.cityFootprint,
+        locatedRatio: city.locatedRatio,
+        recordCount: city.recordCount,
         budgetExecutionRate,
         journeyRows,
       },
@@ -726,7 +762,7 @@ export class StatsService {
         .getMany();
       const entryMap = new Map(entries.map((e) => [e.id, e]));
       for (const v of voiceRows) {
-        const e = entryMap.get(v.ownerId);
+        const e = entryMap.get(v.ownerId!);
         const sec = Number(
           v.durationSec ?? (e?.payload as any)?.durationSec ?? 0,
         );

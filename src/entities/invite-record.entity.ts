@@ -34,6 +34,6 @@ export class InviteRecord {
   @Column({ type: 'datetime', nullable: true })
   rewardedAt?: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

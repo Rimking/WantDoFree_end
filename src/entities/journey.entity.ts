@@ -39,13 +39,9 @@ export class Journey {
   @Column({ length: 128, default: '' })
   origin: string;
 
-  /** 目的地展示串（可选；与 destinations[] 同步） */
+  /** 目的地展示串（旧数据兼容读取；新旅程不再写入） */
   @Column({ length: 128, nullable: true })
   destination?: string;
-
-  /** 多选目的地城市名（结构化） */
-  @Column({ type: 'json', nullable: true })
-  destinations?: string[] | null;
 
   @Column({ type: 'date' })
   startDate: string;
@@ -79,10 +75,10 @@ export class Journey {
   @Column({ type: 'int', default: 1 })
   syncVersion: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 
   @OneToMany(() => Entry, (e) => e.journey)

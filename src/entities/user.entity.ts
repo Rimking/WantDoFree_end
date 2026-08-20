@@ -96,13 +96,13 @@ export class User {
   @Column({ type: 'int', default: 0, comment: '已用语音秒数' })
   usedVoiceSec: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 
-  @DeleteDateColumn()
+  @DeleteDateColumn({ type: 'datetime', precision: 0 })
   deletedAt?: Date | null;
 
   @OneToMany(() => Journey, (j) => j.user)

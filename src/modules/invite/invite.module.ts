@@ -4,7 +4,6 @@ import { InviteCode } from '../../entities/invite-code.entity';
 import { InviteRecord } from '../../entities/invite-record.entity';
 import { User } from '../../entities/user.entity';
 import { InviteService } from './invite.service';
-import { InviteController } from './invite.controller';
 import { MemberBenefitModule } from '../membership/member-benefit.module';
 
 @Module({
@@ -12,7 +11,6 @@ import { MemberBenefitModule } from '../membership/member-benefit.module';
     TypeOrmModule.forFeature([InviteCode, InviteRecord, User]),
     MemberBenefitModule,
   ],
-  controllers: [InviteController],
   providers: [InviteService],
   exports: [InviteService],
 })

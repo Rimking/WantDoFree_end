@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../common/datetime.util';
+
 import {
   Injectable,
   NotFoundException,
@@ -230,7 +232,7 @@ export class ShareService {
         // 仅路线名，不含精确坐标（隐私）
         route: payload?.route ?? [],
       },
-      createdAt: share.createdAt,
+      createdAt: formatDateTime(share.createdAt),
     };
   }
 

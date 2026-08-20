@@ -23,6 +23,6 @@ export class InviteCode {
   @Column({ type: 'boolean', default: false })
   bonusGranted: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

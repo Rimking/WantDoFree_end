@@ -1,9 +1,7 @@
 import {
   Body,
   Controller,
-  Get,
   Post,
-  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -17,6 +15,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { MAX_AUDIO_BYTES } from './media.util';
 
+/**
+ * 媒体上传 API（统一契约 POST /media/prepare → local-upload / confirm）。
+ * 旧 GET /media/upload-url 兼容端点已于 2026-08-20 下线。
+ */
 @Controller('media')
 @UseGuards(JwtAuthGuard)
 export class MediaController {
@@ -68,15 +70,5 @@ export class MediaController {
     throw new BadRequestException(
       '请提供 mediaId+confirmToken，或兼容字段 entryId+kind+url',
     );
-  }
-
-  /** @deprecated 请改用 POST /media/prepare */
-  @Get('upload-url')
-  uploadUrl(
-    @CurrentUser() u: { id: string },
-    @Query('key') key: string,
-    @Query('kind') kind: string,
-  ) {
-    return this.media.getUploadUrlLegacy(u.id, key, kind);
   }
 }

@@ -1,11 +1,8 @@
 import {
-  BadRequestException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
-import { randomBytes } from 'crypto';
+import { DataSource, Repository } from 'typeorm';
 import { InviteCode } from '../../entities/invite-code.entity';
 import { InviteRecord } from '../../entities/invite-record.entity';
 import { User } from '../../entities/user.entity';
@@ -26,121 +23,6 @@ export class InviteService {
     private readonly benefit: MemberBenefitService,
     private readonly dataSource: DataSource,
   ) {}
-
-  private async genCode(): Promise<string> {
-    for (let i = 0; i < 8; i++) {
-      const code = randomBytes(4).toString('hex').slice(0, 8).toUpperCase();
-      const exists = await this.codes.findOne({ where: { code } });
-      if (!exists) return code;
-    }
-    throw new BadRequestException('invite code generation failed');
-  }
-
-  async getOrCreateCode(userId: string) {
-    let row = await this.codes.findOne({ where: { userId } });
-    if (!row) {
-      row = await this.codes.save(
-        this.codes.create({
-          userId,
-          code: await this.genCode(),
-          bonusGranted: false,
-        }),
-      );
-    }
-    return {
-      code: row.code,
-      sharePath: `/pages/Invite/Invite?code=${row.code}`,
-      perInviteDays: PER_INVITE_DAYS,
-      threshold: THRESHOLD,
-      bonusDays: BONUS_DAYS,
-    };
-  }
-
-  async getStats(userId: string) {
-    await this.getOrCreateCode(userId);
-    const rows = await this.records.find({
-      where: { inviterId: userId },
-      order: { createdAt: 'DESC' },
-    });
-    const activated = rows.filter(
-      (r) => r.status === 'ACTIVATED' || r.status === 'REWARDED',
-    );
-    const totalRewardDays = rows.reduce((s, r) => s + (r.rewardDays || 0), 0);
-    const codeRow = await this.codes.findOne({ where: { userId } });
-
-    const inviteeIds = rows.map((r) => r.inviteeId);
-    const users =
-      inviteeIds.length > 0
-        ? await this.users.find({ where: { id: In(inviteeIds) } })
-        : [];
-    const nickMap = new Map(users.map((u) => [u.id, u.nick ?? '旅人']));
-
-    return {
-      code: codeRow?.code,
-      invitedCount: activated.length,
-      registeredCount: rows.length,
-      threshold: THRESHOLD,
-      totalRewardDays,
-      bonusGranted: !!codeRow?.bonusGranted,
-      nextMilestone:
-        activated.length >= THRESHOLD
-          ? null
-          : {
-              need: THRESHOLD - activated.length,
-              rewardDays: BONUS_DAYS,
-            },
-      records: rows.map((r) => ({
-        inviteeId: r.inviteeId,
-        nickname: nickMap.get(r.inviteeId) ?? '旅人',
-        status: r.status,
-        rewardDays: r.rewardDays,
-        rewardedAt: r.rewardedAt ?? null,
-        createdAt: r.createdAt,
-      })),
-    };
-  }
-
-  /** 被邀请人绑定邀请码（须登录，一般为新用户）。 */
-  async accept(userId: string, codeRaw: string) {
-    const code = String(codeRaw || '')
-      .trim()
-      .toUpperCase();
-    if (!code) throw new BadRequestException('code required');
-
-    const inviterCode = await this.codes.findOne({ where: { code } });
-    if (!inviterCode) throw new NotFoundException('invite code not found');
-    if (inviterCode.userId === userId) {
-      throw new BadRequestException('cannot invite yourself');
-    }
-
-    const existing = await this.records.findOne({
-      where: { inviteeId: userId },
-    });
-    if (existing) {
-      return {
-        ok: true,
-        alreadyBound: true,
-        status: existing.status,
-        inviterId: existing.inviterId,
-      };
-    }
-
-    const row = await this.records.save(
-      this.records.create({
-        inviterId: inviterCode.userId,
-        inviteeId: userId,
-        code,
-        status: 'REGISTERED',
-        rewardDays: 0,
-      }),
-    );
-    return {
-      ok: true,
-      alreadyBound: false,
-      status: row.status,
-      inviterId: row.inviterId,
-    };
-  }
 
   /**
    * 被邀请人首次开通会员成功后发奖：双方各 +30 天；满 3 人邀请人额外 +365。

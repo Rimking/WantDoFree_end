@@ -38,6 +38,6 @@ export class UserStatsSnapshot {
   @Column({ type: 'bigint', default: 0 })
   totalExpense: string;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
   updatedAt: Date;
 }

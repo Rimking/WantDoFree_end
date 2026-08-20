@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -15,6 +7,10 @@ import {
   MeExpenseSummaryBodyDto,
 } from '../journey/journey-api.dto';
 
+/**
+ * 费用汇总 API（新契约：POST + body）。
+ * 旧 GET expense-summary 兼容端点已于 2026-08-20 下线。
+ */
 @Controller('journeys')
 @UseGuards(JwtAuthGuard)
 export class ExpenseController {
@@ -26,12 +22,6 @@ export class ExpenseController {
     @Body() body: ExpenseSummaryBodyDto,
   ) {
     const raw = await this.expense.summary(u.id, body.journeyId);
-    return this.expense.toExpenseModule(raw);
-  }
-
-  @Get(':id/expense-summary')
-  async summary(@CurrentUser() u: { id: string }, @Param('id') id: string) {
-    const raw = await this.expense.summary(u.id, id);
     return this.expense.toExpenseModule(raw);
   }
 }
@@ -47,15 +37,6 @@ export class MeExpenseController {
     @Body() body: MeExpenseSummaryBodyDto,
   ) {
     const y = body.year ?? new Date().getFullYear();
-    return this.expense.globalSummary(u.id, y);
-  }
-
-  @Get('expense-summary')
-  global(
-    @CurrentUser() u: { id: string },
-    @Query('year') year?: string,
-  ) {
-    const y = year ? Number(year) : new Date().getFullYear();
     return this.expense.globalSummary(u.id, y);
   }
 }

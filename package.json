@@ -11,7 +11,8 @@
     "migration:run": "typeorm-ts-node-commonjs -d ./typeorm-cli.ts migration:run",
     "migration:revert": "typeorm-ts-node-commonjs -d ./typeorm-cli.ts migration:revert",
     "seed:demo": "ts-node -r dotenv/config src/scripts/seed-demo.ts",
-    "e2e:local": "ts-node --transpile-only src/scripts/e2e-local.ts"
+    "e2e:local": "ts-node --transpile-only src/scripts/e2e-local.ts",
+    "cleanup:legacy-places": "ts-node -r dotenv/config src/scripts/cleanup-legacy-places.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",

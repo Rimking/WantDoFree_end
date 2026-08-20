@@ -1,39 +1,32 @@
 import {
   Body,
   Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
   Post,
-  Query,
   UseGuards,
 } from '@nestjs/common';
 import { RecordingService } from './recording.service';
 import {
-  DeleteEntriesDto,
-  PatchRecordDto,
-  PatchRecordTimeDto,
   RecordIdBodyDto,
   RecordTimeBodyDto,
   RecordUpdateBodyDto,
-  SyncBatchDto,
+  CreateEntryBodyDto,
 } from './recording.dto';
 import {
   EntriesDeleteBodyDto,
   EntriesListBodyDto,
   EntriesRecentBodyDto,
-  EntriesSyncBodyDto,
 } from '../journey/journey-api.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
+/**
+ * 记录 API（新契约：有参一律 POST + body）。
+ * 旧 path 风格 GET/PATCH/DELETE 兼容端点已于 2026-08-20 全部下线。
+ */
 @Controller('journeys')
 @UseGuards(JwtAuthGuard)
 export class RecordingController {
   constructor(private readonly recording: RecordingService) {}
-
-  // ─── 新契约 POST ────────────────────────────────────────
 
   @Post('entries/list')
   async listPost(
@@ -58,12 +51,16 @@ export class RecordingController {
     return this.recording.listRecent(u.id, body?.limit ?? 10);
   }
 
-  @Post('entries/sync')
-  syncPost(
+  /**
+   * 新建记录（单条）：一次提交该记录全部信息（内容/定位/花费/媒体）。
+   * 媒体先经 /media/prepare 上传拿到 URL 再提交；无 clientId/city。
+   */
+  @Post('entries/create')
+  createPost(
     @CurrentUser() u: { id: string },
-    @Body() body: EntriesSyncBodyDto,
+    @Body() body: CreateEntryBodyDto,
   ) {
-    return this.recording.sync(u.id, body.journeyId, body.entries);
+    return this.recording.createEntry(u.id, body);
   }
 
   @Post('entries/delete')
@@ -76,57 +73,6 @@ export class RecordingController {
       from: body.from,
       to: body.to,
     });
-  }
-
-  // ─── 兼容 ───────────────────────────────────────────────
-
-  @Post(':id/entries/sync')
-  sync(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: SyncBatchDto,
-  ) {
-    return this.recording.sync(u.id, id, dto.entries);
-  }
-
-  @Get(':id/entries')
-  list(@CurrentUser() u: { id: string }, @Param('id') id: string) {
-    return this.recording.listByJourney(u.id, id);
-  }
-
-  @Get(':id/records')
-  listRecords(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Query('dayIndex') dayIndex?: string,
-  ) {
-    const day =
-      dayIndex != null && dayIndex !== ''
-        ? parseInt(dayIndex, 10)
-        : undefined;
-    return this.recording.listByJourney(
-      u.id,
-      id,
-      Number.isFinite(day as number) ? day : undefined,
-    );
-  }
-
-  @Delete(':id/entries/:entryId')
-  removeOne(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Param('entryId') entryId: string,
-  ) {
-    return this.recording.removeEntry(u.id, id, entryId);
-  }
-
-  @Post(':id/entries/delete')
-  removeMany(
-    @CurrentUser() u: { id: string },
-    @Param('id') id: string,
-    @Body() dto: DeleteEntriesDto,
-  ) {
-    return this.recording.removeEntries(u.id, id, dto);
   }
 }
 
@@ -168,31 +114,5 @@ export class RecordsController {
   ) {
     const { recordId, ...dto } = body;
     return this.recording.patchRecordTime(u.id, recordId, dto);
-  }
-
-  @Patch(':recordId')
-  patch(
-    @CurrentUser() u: { id: string },
-    @Param('recordId') recordId: string,
-    @Body() dto: PatchRecordDto,
-  ) {
-    return this.recording.patchRecord(u.id, recordId, dto);
-  }
-
-  @Patch(':recordId/time')
-  patchTime(
-    @CurrentUser() u: { id: string },
-    @Param('recordId') recordId: string,
-    @Body() dto: PatchRecordTimeDto,
-  ) {
-    return this.recording.patchRecordTime(u.id, recordId, dto);
-  }
-
-  @Delete(':recordId')
-  remove(
-    @CurrentUser() u: { id: string },
-    @Param('recordId') recordId: string,
-  ) {
-    return this.recording.removeRecord(u.id, recordId);
   }
 }

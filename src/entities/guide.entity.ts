@@ -40,7 +40,7 @@ export class Guide {
   @Column({ type: 'int', nullable: true })
   totalCost?: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'datetime', precision: 0, default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
   @OneToMany(() => ShareEvent, (s) => s.guide)
