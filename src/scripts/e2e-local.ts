@@ -49,6 +49,21 @@ interface ReqOpts {
   want?: number[];
 }
 
+/** 后端统一包裹 { code, data, message } → 取 data；裸返（@SkipResponseWrap）时原样返回。 */
+function unwrap(body: any): any {
+  if (
+    body &&
+    typeof body === 'object' &&
+    !Array.isArray(body) &&
+    'code' in body &&
+    'data' in body &&
+    'message' in body
+  ) {
+    return body.data;
+  }
+  return body;
+}
+
 async function req(method: string, path: string, opts: ReqOpts = {}) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.token) headers['Authorization'] = 'Bearer ' + opts.token;
@@ -64,7 +79,7 @@ async function req(method: string, path: string, opts: ReqOpts = {}) {
   } catch {
     json = null;
   }
-  return { status: res.status, json, text };
+  return { status: res.status, json: unwrap(json), raw: json, text };
 }
 
 function isOk(res: { status: number }, want?: number[]): boolean {
@@ -78,9 +93,12 @@ async function main(): Promise<void> {
   let app: any = null;
   if (process.env.E2E_INPROC) {
     const { NestFactory } = await import('@nestjs/core');
+    const { VersioningType } = await import('@nestjs/common');
     const { AppModule } = await import('../app.module');
     app = await NestFactory.create(AppModule);
+    // 与 main.ts 保持一致：全局前缀 + URI 版本（缺版本化时路由挂在 /dream/* 而非 /dream/v1/*）
     app.setGlobalPrefix('dream');
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     await app.init();
     const server = app.getHttpServer();
     await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -149,20 +167,26 @@ async function main(): Promise<void> {
   }
   const orderNo: string = order.json.orderNo;
 
-  const pay = await req('POST', `/membership/orders/${orderNo}/pay`, { token });
+  // mock 支付需 DevOnlyGuard（ENABLE_DEV_PAY）+ 调试密钥（DEV_PAY_NOTIFY_SECRET）
+  const devPaySecret = process.env.DEV_PAY_NOTIFY_SECRET;
+  const pay = await req('POST', `/membership/orders/${orderNo}/pay`, {
+    token,
+    body: { secret: devPaySecret },
+  });
   if (isOk(pay) && pay.json.status === 'paid') ok('POST .../pay mock 支付成功 (status=paid)');
-  else bad('支付失败', JSON.stringify(pay.json));
+  else bad('支付失败（检查 ENABLE_DEV_PAY=true 与 DEV_PAY_NOTIFY_SECRET 是否配置）', JSON.stringify(pay.json));
 
   const me1 = await req('GET', '/membership/me', { token });
   if (isOk(me1) && me1.json.plan === 'pro' && me1.json.status === 'ACTIVE') {
     ok('支付后 /membership/me = pro / ACTIVE');
   } else bad('支付后未返 pro', JSON.stringify(me1.json));
 
-  const quota = await req('GET', '/me/quota', { token });
-  if (isOk(quota) && quota.json?.photo?.quota === 300 && quota.json?.voiceSec?.quota === 10800) {
+  // 配额摘要在 /membership/me 的 quota 字段
+  const quotaJson = me1.json?.quota;
+  if (isOk(me1) && quotaJson?.photo?.quota === 300 && quotaJson?.voiceSec?.quota === 10800) {
     ok('配额联动生效：photo.quota=300 / voiceSec.quota=10800');
   } else {
-    bad('配额联动异常', JSON.stringify(quota.json));
+    bad('配额联动异常', JSON.stringify(quotaJson));
   }
 
   const renOff = await req('PATCH', '/membership/renewal', { token, body: { autoRenew: false } });

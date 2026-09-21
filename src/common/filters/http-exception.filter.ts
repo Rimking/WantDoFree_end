@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { isProd } from '../env';
 
 /** class-validator / Nest 默认英文约束文案 → 对前端只展示「参数错误」 */
 function isTechnicalParamMessage(message: unknown): boolean {
@@ -32,13 +33,21 @@ function isTechnicalParamMessage(message: unknown): boolean {
   return false;
 }
 
+/**
+ * 业务码形态：4xxxx/5xxxx 数字串，或 CONTENT_BLOCKED / GUIDE_NOT_READY 这类大写枚举。
+ * 其余（Nest 回落出的 'Not Found'/'Forbidden' 等英文描述）一律归一为 HTTP 状态码，
+ * 保证前端只面对「数字状态 + 大写业务码」两类取值。
+ */
+function isBusinessCode(code: string): boolean {
+  return /^[45]\d{4}$/.test(code) || /^[A-Z][A-Z0-9_]{3,}$/.test(code);
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
-    const isProd = process.env.NODE_ENV === 'production';
 
     const status =
       exception instanceof HttpException
@@ -97,14 +106,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     }
 
+    // 英文状态描述串不是业务码，归一为数字状态（业务码经 extra.code 透传，不受影响）
+    if (typeof code === 'string' && !isBusinessCode(code)) code = status;
+
     response.status(status).json({
       code,
+      // 错误响应同样保持 { code, data, message } 结构：data 恒为 null
+      data: null,
       message,
       ...extra,
       timestamp: new Date().toISOString(),
       path: request.url,
       // 入参错误不返回 stack，避免原文进响应
-      ...(!isProd &&
+      ...(!isProd() &&
       !isParamError &&
       exception instanceof Error
         ? { stack: exception.stack }

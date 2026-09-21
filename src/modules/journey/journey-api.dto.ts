@@ -203,10 +203,6 @@ export class PlanPlaceCreateBodyDto {
   @Length(1, 128)
   name: string;
 
-  @IsOptional()
-  @IsString()
-  note?: string;
-
   /** 关联日期+预计时间，格式 `2026-09-18 00:00:00`，与记录 recordedAt 相同 */
   @IsOptional()
   @IsString()
@@ -351,4 +347,26 @@ export class HandbookListBodyDto {
   @IsOptional()
   @IsString()
   phase?: string;
+}
+
+// ─── 地图聚合（/journeys/map/*） ───────────────────────────────
+
+export class JourneyMapSummaryBodyDto {
+  /** 限定旅程；不传 = 用户全部旅程（全局足迹地图） */
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  journeyId?: string;
+}
+
+export class JourneyMapPlaceNotesBodyDto {
+  /** 聚类锚点：地点组内最早一条记录的 clientId（由 summary 返回） */
+  @IsString()
+  @Length(1, 64)
+  anchorId: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 64)
+  journeyId?: string;
 }

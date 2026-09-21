@@ -1,10 +1,12 @@
 import { Injectable, UnauthorizedException, Logger, ForbiddenException } from '@nestjs/common';
 import axios from 'axios';
 import { ConfigService } from '@nestjs/config';
+import { isMockLoginEnabled, isProd } from '../../common/env';
 
 /**
  * 微信小程序适配：code2Session。
- * 未配置 WX_APPID/WX_SECRET 时进入开发模式（code 当作 openid），仅用于本地联调。
+ * 未配置 WX_APPID/WX_SECRET 时只有显式开启 ENABLE_MOCK_LOGIN（且非生产）才能
+ * 用 code 直接换取身份，用于本地联调；否则一律拒绝。
  */
 @Injectable()
 export class WechatService {
@@ -13,43 +15,40 @@ export class WechatService {
 
   constructor(private readonly config: ConfigService) {}
 
-  private get isProd() {
-    return this.config.get('NODE_ENV') === 'production';
-  }
-
   isConfigured(): boolean {
     return Boolean(this.config.get('WX_APPID') && this.config.get('WX_SECRET'));
   }
 
   async code2Session(code: string): Promise<{ openid: string; mock: boolean }> {
-    // 生产：禁止开发登录与 code 当 openid
-    if (this.isProd) {
-      if (code === 'dev_openid_demo') {
-        throw new ForbiddenException({
-          code: 'DEV_DISABLED',
-          message: '生产环境禁止开发登录',
-        });
-      }
-      if (!this.isConfigured()) {
-        throw new ForbiddenException({
-          code: 'WX_NOT_CONFIGURED',
-          message: '生产环境必须配置 WX_APPID/WX_SECRET',
-        });
-      }
+    if (isProd() && !this.isConfigured()) {
+      throw new ForbiddenException({
+        code: 'WX_NOT_CONFIGURED',
+        message: '生产环境必须配置 WX_APPID/WX_SECRET',
+      });
     }
 
-    // 本地种子账号：开发环境允许用固定 code 登录到演示用户（openid 已绑真机）
-    if (!this.isProd && code === 'dev_openid_demo') {
-      const bound =
-        this.config.get<string>('DEMO_USER_OPENID') ||
-        'oGSAD5cLUWt4wvvHh7G1gyQpyIFE';
-      this.logger.warn(`使用种子账号 openid=${bound}（仅非生产，code=dev_openid_demo）`);
-      return { openid: bound, mock: true };
+    // 模拟登录仅限显式开启 ENABLE_MOCK_LOGIN 的非生产环境；
+    // 未开启时任何 code 都不能换取身份，防止「忘配生产环境变量」被冒名登录。
+    if (isMockLoginEnabled()) {
+      if (code === 'dev_openid_demo') {
+        const bound =
+          this.config.get<string>('DEMO_USER_OPENID') || 'dev_openid_demo';
+        this.logger.warn(
+          `使用种子账号 openid=${bound}（code=dev_openid_demo，仅限模拟登录开启时）`,
+        );
+        return { openid: bound, mock: true };
+      }
+      if (!this.isConfigured()) {
+        this.logger.warn('WX_APPID/WX_SECRET 未配置，使用 code 作为 openid（模拟登录）');
+        return { openid: code, mock: true };
+      }
     }
 
     if (!this.isConfigured()) {
-      this.logger.warn('WX_APPID/WX_SECRET 未配置，使用 code 作为 openid（dev）');
-      return { openid: code, mock: true };
+      throw new ForbiddenException({
+        code: 'WX_NOT_CONFIGURED',
+        message: '微信登录未配置，且未开启 ENABLE_MOCK_LOGIN',
+      });
     }
     const { data } = await axios.get(
       'https://api.weixin.qq.com/sns/jscode2session',
@@ -68,6 +67,39 @@ export class WechatService {
       );
     }
     return { openid: data.openid, mock: false };
+  }
+
+  /**
+   * getPhoneNumber（基础库 2.21.2+）：授权 code 换手机号。
+   * 未配置微信时：模拟登录开启则把 code 直接作为手机号（本地联调），否则拒绝。
+   */
+  async getPhoneNumber(code: string): Promise<{ phone: string; mock: boolean }> {
+    if (!this.isConfigured()) {
+      if (isMockLoginEnabled()) {
+        this.logger.warn('WX_APPID/WX_SECRET 未配置，以 code 作为手机号（模拟绑定）');
+        return { phone: code, mock: true };
+      }
+      throw new ForbiddenException({
+        code: 'WX_NOT_CONFIGURED',
+        message: '微信手机号服务未配置',
+      });
+    }
+    const token = await this.getAccessToken();
+    const { data } = await axios.post(
+      `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${token}`,
+      { code },
+    );
+    if (data.errcode !== 0) {
+      throw new UnauthorizedException(
+        `wx phone failed: ${data.errcode} ${data.errmsg}`,
+      );
+    }
+    const phone: string =
+      data.phone_info?.purePhoneNumber || data.phone_info?.phoneNumber || '';
+    if (!phone) {
+      throw new UnauthorizedException('wx phone: empty phone_info');
+    }
+    return { phone, mock: false };
   }
 
   async getAccessToken(): Promise<string> {
@@ -134,8 +166,7 @@ export class WechatService {
         page: input.page || 'pages/ShareView/ShareView',
         width: input.width ?? 430,
         check_path: false,
-        env_version:
-          this.config.get('NODE_ENV') === 'production' ? 'release' : 'trial',
+        env_version: isProd() ? 'release' : 'trial',
       },
       { responseType: 'arraybuffer' },
     );

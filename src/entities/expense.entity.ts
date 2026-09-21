@@ -21,7 +21,6 @@ export class Expense {
 
   @ManyToOne(() => Entry, (e) => e.expenses, {
     onDelete: 'CASCADE',
-    createForeignKeyConstraints: false,
   })
   @JoinColumn({ name: 'entryId', referencedColumnName: 'id' })
   entry?: Entry;

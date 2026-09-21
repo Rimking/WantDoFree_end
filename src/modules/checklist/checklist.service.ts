@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import { ChecklistItem } from '../../entities/checklist-item.entity';
 import { Journey } from '../../entities/journey.entity';
 import { DEFAULT_PLAN_CHECKS } from '../../common/enums/catalog';
@@ -83,15 +83,16 @@ export class ChecklistService {
   }
 
   /** 新建旅程时写入默认准备事项（护照/机票等） */
-  async seedDefaults(journeyId: string) {
-    const count = await this.items.count({
+  async seedDefaults(journeyId: string, manager?: EntityManager) {
+    const runner = manager ?? this.items.manager;
+    const count = await runner.count(ChecklistItem, {
       where: { journeyId, deletedAt: IsNull() },
     });
     if (count > 0) return;
     let order = 0;
     for (const c of DEFAULT_PLAN_CHECKS) {
-      await this.items.save(
-        this.items.create({
+      await runner.save(
+        runner.create(ChecklistItem, {
           journeyId,
           title: c.text,
           isDefaultChecked: false,

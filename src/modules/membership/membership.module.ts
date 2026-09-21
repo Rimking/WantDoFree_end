@@ -7,6 +7,7 @@ import { MembershipService } from './membership.service';
 import { MembershipController } from './membership.controller';
 import { MemberBenefitModule } from './member-benefit.module';
 import { InviteModule } from '../invite/invite.module';
+import { DevOnlyGuard } from '../../common/guards/dev-only.guard';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { InviteModule } from '../invite/invite.module';
     forwardRef(() => InviteModule),
   ],
   controllers: [MembershipController],
-  providers: [MembershipService],
+  providers: [MembershipService, DevOnlyGuard],
   exports: [MembershipService],
 })
 export class MembershipModule {}

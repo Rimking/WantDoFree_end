@@ -15,7 +15,6 @@ export type PlanPlace = {
   /** @deprecated 老数据留存；新建地点由服务端生成 */
   clientId: string;
   name: string;
-  note?: string;
   coverUrl?: string;
   /** 纬度（计划地图打点）；可空——允许仅填名称保存 */
   lat?: number | null;

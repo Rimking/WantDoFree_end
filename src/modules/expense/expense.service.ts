@@ -7,7 +7,6 @@ import { Journey } from '../../entities/journey.entity';
 import {
   normalizeExpenseCategory,
   normalizeStatus,
-  normalizeThemeTag,
 } from '../../common/enums/catalog';
 
 @Injectable()
@@ -136,7 +135,6 @@ export class ExpenseService {
       .addSelect('journey.destination', 'destination')
       .addSelect('journey.cover', 'coverUrl')
       .addSelect('journey.status', 'status')
-      .addSelect('journey.themeTags', 'themeTags')
       .addSelect('journey.budgetAmount', 'budgetAmount')
       .addSelect('SUM(e.amountCent)', 'totalCent')
       .addSelect('COUNT(*)', 'count')
@@ -148,7 +146,6 @@ export class ExpenseService {
       .addGroupBy('journey.destination')
       .addGroupBy('journey.cover')
       .addGroupBy('journey.status')
-      .addGroupBy('journey.themeTags')
       .addGroupBy('journey.budgetAmount')
       .getRawMany();
 
@@ -156,23 +153,12 @@ export class ExpenseService {
     const count = rows.reduce((s, r) => s + Number(r.cnt), 0);
 
     const byJourney = byJourneyRaw.map((r) => {
-      let themeTags: string[] = [];
-      try {
-        const raw = r.themeTags;
-        const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        themeTags = Array.isArray(arr)
-          ? arr.map((t: string) => normalizeThemeTag(t) ?? t)
-          : [];
-      } catch {
-        themeTags = [];
-      }
       return {
         journeyId: r.journeyId,
         title: r.title,
         destination: r.destination ?? null,
         coverUrl: r.coverUrl ?? null,
         status: normalizeStatus(r.status) ?? r.status,
-        themeTags,
         totalCent: Number(r.totalCent),
         count: Number(r.count),
         budgetAmount: r.budgetAmount != null ? Number(r.budgetAmount) : null,

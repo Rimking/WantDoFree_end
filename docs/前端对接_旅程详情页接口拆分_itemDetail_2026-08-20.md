@@ -1,5 +1,9 @@
 # 前端对接 · 旅程详情页接口拆分：/journeys/item/detail（2026-08-20）
 
+> **2026-09-11 全局响应包裹**：所有接口返回 `{ code, data, message }`（成功 `code=2000`，失败非 2000）；下文各响应示例中的业务字段均位于 **`data`** 内。
+
+> **2026-09-13 变更**：`journey.themeTags` 已删除（主题维度下线），本文响应示例/字段表/对比表已同步；详见 `前端对接_移除主题与同行人维度_2026-09-13.md`。
+
 > 后端已实现并编译通过，前端按本文档改造。
 > 涉及文件：`mini/src/api/journey.ts`、`mini/src/api/mappers.ts`、`mini/src/pages/JourneyDetail/composables/useJourneyDetail.ts`（及可选 `JourneyMap`）。
 
@@ -47,7 +51,6 @@
     "status": "ongoing",
     "displayStatus": "ongoing",
     "budgetAmount": 300000,
-    "themeTags": ["city"],
     "placeCount": 5
   },
   "records": [
@@ -112,10 +115,9 @@
 | `status` | string | `planned` \| `ongoing` \| `finished` |
 | `displayStatus` | string | `planning` \| `departing` \| `ongoing` \| `finished` \| `draft`（展示态） |
 | `budgetAmount` | number\|null | 预算（分） |
-| `themeTags` | string[] | 主题标签（归一后） |
 | `placeCount` | number | 预定点总数 = `plan.places.length`（含无坐标点） |
 
-> 无 `clientId` / `companions` / `destination` / `createdAt` / `updatedAt` / `recordCount`。
+> 无 `clientId` / `destination` / `createdAt` / `updatedAt` / `recordCount`。
 > `recordCount` 由前端从 `records.length` 取。
 
 ### 3.2 records（记录时间线）
@@ -279,7 +281,7 @@ expenseStore.setJourneySummary(journeyId, detail.expense)
 | 维度 | 旧 `/journeys/detail` | 新 `/journeys/item/detail` |
 |---|---|---|
 | 用途 | JourneyDetail + HandbookView 共用 | 仅 JourneyDetail |
-| journey | 含 clientId/destination/companions/createdAt/updatedAt | 精简：title/coverUrl/origin/时间/status/displayStatus/budgetAmount/themeTags/placeCount |
+| journey | 含 clientId/destination/createdAt/updatedAt | 精简：title/coverUrl/origin/时间/status/displayStatus/budgetAmount/placeCount |
 | journeyStats | placeCount/recordCount/expenseTotalCent | 无（placeCount 并入 journey；recordCount 用 records.length） |
 | planProgress | checkDone/checkTotal/pct | 无 |
 | handbook | phase/shareSummary/... | 无 |
@@ -296,7 +298,7 @@ expenseStore.setJourneySummary(journeyId, detail.expense)
 ## 7. 验收清单
 
 - [ ] `journeyApi.itemDetail` 调通，返回四块 lean 结构
-- [ ] JourneyDetail 页头部：主图/标题/时间/状态/出发点/预算/主题 正常
+- [ ] JourneyDetail 页头部：主图/标题/时间/状态/出发点/预算 正常
 - [ ] 记录时间线：按 `recordedAt` 倒序；预定点占位记录带「预定地点」标签（`source=plan_place`）
 - [ ] 花费 Tab：总额/笔数/分类占比正常（无 byDay 不影响）
 - [ ] 行程地图：`placesByDay` 预定点 + 自由定位点不重复；点击跳转分流正确

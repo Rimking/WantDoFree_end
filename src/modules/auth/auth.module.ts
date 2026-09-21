@@ -17,10 +17,17 @@ import { WechatModule } from '../../infrastructure/wechat/wechat.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (c: ConfigService) => ({
-        secret: c.get('JWT_SECRET') || 'tuji_dev_secret',
-        signOptions: { expiresIn: c.get('JWT_EXPIRES_IN') || '7d' },
-      }),
+      useFactory: (c: ConfigService) => {
+        // 密钥缺失直接启动失败：回落默认值等于把签名密钥公开在源码里
+        const secret = c.get<string>('JWT_SECRET');
+        if (!secret) {
+          throw new Error('JWT_SECRET 未配置：拒绝以默认密钥启动（防伪造 token）');
+        }
+        return {
+          secret,
+          signOptions: { expiresIn: c.get('JWT_EXPIRES_IN') || '7d' },
+        };
+      },
     }),
   ],
   controllers: [AuthController],

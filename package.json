@@ -10,6 +10,8 @@
     "migration:generate": "typeorm-ts-node-commonjs -d ./typeorm-cli.ts migration:generate",
     "migration:run": "typeorm-ts-node-commonjs -d ./typeorm-cli.ts migration:run",
     "migration:revert": "typeorm-ts-node-commonjs -d ./typeorm-cli.ts migration:revert",
+    "verify:migrations": "ts-node -r dotenv/config src/scripts/verify-migrations.ts",
+    "backfill:plans": "ts-node -r dotenv/config src/scripts/backfill-journey-plans.ts",
     "seed:demo": "ts-node -r dotenv/config src/scripts/seed-demo.ts",
     "e2e:local": "ts-node --transpile-only src/scripts/e2e-local.ts",
     "cleanup:legacy-places": "ts-node -r dotenv/config src/scripts/cleanup-legacy-places.ts"

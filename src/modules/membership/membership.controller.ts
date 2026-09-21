@@ -10,10 +10,12 @@ import {
 import { MembershipService } from './membership.service';
 import {
   CreateMembershipOrderDto,
+  PayMembershipOrderDto,
   RefundDto,
   SetRenewalDto,
 } from './membership.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { DevOnlyGuard } from '../../common/guards/dev-only.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('membership')
@@ -56,10 +58,18 @@ export class MembershipController {
     return this.membership.createOrder(u.id, dto);
   }
 
+  /**
+   * mock 支付完成（无真实微信支付前的前端联调通道）。
+   * DevOnlyGuard 限定「非生产 且 ENABLE_DEV_PAY=true」，服务内另校验调试密钥。
+   */
   @Post('orders/:orderNo/pay')
-  @UseGuards(JwtAuthGuard)
-  pay(@CurrentUser() u: { id: string }, @Param('orderNo') orderNo: string) {
-    return this.membership.payOrder(orderNo, u.id);
+  @UseGuards(JwtAuthGuard, DevOnlyGuard)
+  pay(
+    @CurrentUser() u: { id: string },
+    @Param('orderNo') orderNo: string,
+    @Body() dto: PayMembershipOrderDto,
+  ) {
+    return this.membership.payOrder(orderNo, u.id, dto?.secret);
   }
 
   @Get('orders/:orderNo')

@@ -142,6 +142,11 @@ export class JourneyAggregateService {
         durationSec: v.durationSec ?? null,
       })),
       expenseAmountCent: raw.expense?.amountCent ?? 0,
+      // 花费明细（保留分类）：时间轴卡片按分类命名/着色，不能只回合计金额
+      expenses: (raw.expenses ?? []).map((x: any) => ({
+        amountCent: x.amountCent ?? 0,
+        category: x.category ?? 'other',
+      })),
       source: raw.payload?.source ?? null,
       placeClientId: raw.payload?.placeClientId ?? null,
     };
@@ -199,7 +204,6 @@ export class JourneyAggregateService {
           category: p.category ?? null,
           intent: p.intent ?? null,
           locationName: p.locationName ?? null,
-          note: p.note ?? null,
           coverUrl: p.coverUrl ?? p.cover ?? p.images?.[0] ?? null,
           images: p.images ?? (p.coverUrl ? [p.coverUrl] : []),
         },
@@ -229,7 +233,6 @@ export class JourneyAggregateService {
           category: null,
           intent: null,
           locationName: loc.name ?? null,
-          note: null,
           coverUrl: (r.images?.[0]) ?? null,
           images: r.images ?? [],
         },

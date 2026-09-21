@@ -1,5 +1,9 @@
 # 前端对接 · 游记预览页接口拆分：/journeys/handbook/detail（2026-08-20）
 
+> **2026-09-11 全局响应包裹**：所有接口返回 `{ code, data, message }`（成功 `code=2000`，失败非 2000）；下文各响应示例中的业务字段均位于 **`data`** 内。
+
+> **2026-09-13 变更**：`journey.companions` 已删除（同行人维度下线），本文响应示例/字段表/对比表已同步；详见 `前端对接_移除主题与同行人维度_2026-09-13.md`。
+
 > **✅ 后端已实现并实测通过（2026-08-20）**：`POST /dream/v1/journeys/handbook/detail` 已上线（`journey.controller.ts` → `journey-aggregate.service.ts`），本文件即最终契约，前端按下文改动清单实施。
 > 旅程详情页已独立拆为 `/journeys/item/detail`，本次将游记预览页（HandbookView）也从通用 `/journeys/detail` 中拆出。
 > 涉及文件：`mini/src/api/journey.ts`、`mini/src/api/mappers.ts`、`mini/src/pages/HandbookView/composables/useHandbookView.ts`
@@ -50,8 +54,7 @@ JourneyDetail 已独立拆走，HandbookView 是 `/journeys/detail` 现存的唯
     "startDate": "2026-08-01",
     "endDate": "2026-08-04",
     "status": "ongoing",
-    "displayStatus": "ongoing",
-    "companions": ["solo"]
+    "displayStatus": "ongoing"
   },
   "records": [
     {
@@ -97,8 +100,7 @@ JourneyDetail 已独立拆走，HandbookView 是 `/journeys/detail` 现存的唯
     "startDate": "2026-08-20",
     "endDate": "2026-08-24",
     "status": "ongoing",
-    "displayStatus": "ongoing",
-    "companions": ["solo"]
+    "displayStatus": "ongoing"
   },
   "records": [
     {
@@ -143,7 +145,6 @@ JourneyDetail 已独立拆走，HandbookView 是 `/journeys/detail` 现存的唯
 | `endDate` | string | ✓ | `YYYY-MM-DD` |
 | `status` | string | ✓ | `planned` \| `ongoing` \| `finished`（持久化态） |
 | `displayStatus` | string\|null | | 前端展示态（`planning` / `departing` / `ongoing` / `finished`） |
-| `companions` | string[] | | 同行人标签（`solo`/`couple`/`friends`/`family` 等） |
 
 **前端用途**：
 
@@ -154,10 +155,9 @@ JourneyDetail 已独立拆走，HandbookView 是 `/journeys/detail` 现存的唯
 | `origin` / `destination` | 路线展示「上海 → 成都」 |
 | `startDate` / `endDate` | 日期展示「08.01 — 08.04」；`journeyDayProgress` 计算 Day 1 / 4 |
 | `status` / `displayStatus` | 状态角标「进行中 · Day 1 / 4」 |
-| `companions` | 人数展示「1 人」 |
 
 **不返回**（前端不需要）：
-`clientId` / `themeTags` / `budgetAmount` / `placeCount` / `recordCount` / `expenseTotal` /
+`clientId` / `budgetAmount` / `placeCount` / `recordCount` / `expenseTotal` /
 `createdAt` / `updatedAt` / `plan` / `isPublic` / `syncVersion`
 
 ---
@@ -245,8 +245,7 @@ JourneyDetail 已独立拆走，HandbookView 是 `/journeys/detail` 现存的唯
 6. **content**：后端直接返回原文（不截断），截断/兜底由前端负责
 7. **planPlaces 不返回无 `name` 的点**（纯坐标无名的占位记录不进站点网格）
 8. **coverUrl 兜底**：后端取 `coverUrl ?? cover ?? images[0]`；`images` 缺省时回填 `[coverUrl]`（前端仍按文档做记录照片回填兜底）
-9. **companions**：已归一化（`solo`/`couple`/`friends`/`family`），实测返回 `["solo"]`
-10. **planPlaces.id**：取预定点 `clientId`（`clientId` 缺省时回落 `id`）
+9. **planPlaces.id**：取预定点 `clientId`（`clientId` 缺省时回落 `id`）
 
 ---
 
@@ -389,7 +388,7 @@ planStore.applyRemote(journeyId, {
 | 维度 | 旧 `/journeys/detail` | 新 `/journeys/handbook/detail` |
 |------|----------------------|-------------------------------|
 | 用途 | 多页面共用（JourneyDetail / HandbookView / …） | 仅 HandbookView |
-| journey | 20+ 字段 | 10 字段：id/title/coverUrl/origin/destination/startDate/endDate/status/displayStatus/companions |
+| journey | 20+ 字段 | 9 字段：id/title/coverUrl/origin/destination/startDate/endDate/status/displayStatus |
 | records | 全量 ApiEntry（media/legacy/expenses 明细/voices/payload…） | 7 字段：id/content/recordedAt/dayIndex/location/images/expenses[] |
 | plan | places + checks + budgetEstimate | 仅 places（7 字段：id/name/dayIndex/lat/lng/coverUrl/images/locationName） |
 | journeyStats | placeCount/recordCount/expenseTotalCent | 无 |

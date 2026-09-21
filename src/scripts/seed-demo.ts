@@ -21,22 +21,16 @@ import { ShareEvent } from '../entities/share-event.entity';
 import { YearBudget } from '../entities/year-budget.entity';
 import { Draft } from '../entities/draft.entity';
 import { Order } from '../entities/order.entity';
-import { TravelIdentityDict } from '../entities/travel-identity-dict.entity';
-import { UserIdentity } from '../entities/user-identity.entity';
 import { ChecklistItem } from '../entities/checklist-item.entity';
 import { UserStatsSnapshot } from '../entities/user-stats-snapshot.entity';
 import { MemberPlan } from '../entities/member-plan.entity';
-import {
-  normalizeExpenseCategory,
-  themeLabelOf,
-} from '../common/enums/catalog';
+import { normalizeExpenseCategory } from '../common/enums/catalog';
 
 loadEnv();
 
 const USER_ID = 'aaaaaaaa-1111-1111-1111-111111111111';
-/** 演示用户已绑定真机 openid；本地仍可用 code=dev_openid_demo 登录 */
-const OPENID =
-  process.env.DEMO_USER_OPENID || 'oGSAD5cLUWt4wvvHh7G1gyQpyIFE';
+/** 演示用户 openid：本地可用 code=dev_openid_demo 登录；真机绑定请配置 DEMO_USER_OPENID */
+const OPENID = process.env.DEMO_USER_OPENID || 'dev_openid_demo';
 
 const J = {
   /** 即将出发 */
@@ -153,8 +147,6 @@ async function main() {
       YearBudget,
       Draft,
       Order,
-      TravelIdentityDict,
-      UserIdentity,
       ChecklistItem,
       UserStatsSnapshot,
       MemberPlan,
@@ -232,12 +224,11 @@ async function wipeDemo(ds: DataSource) {
 async function seedUser(ds: DataSource) {
   await ds.query(
     `INSERT INTO users (
-       id, openid, nick, avatar, gender, birthday, provinceCode, cityCode,
-       departureCity, bio, phone, plan, quotaPhoto, quotaVoiceSec, usedPhoto, usedVoiceSec,
+       id, openid, nick, avatar, gender, bio, phone, plan, quotaPhoto, quotaVoiceSec, usedPhoto, usedVoiceSec,
        createdAt, updatedAt
      ) VALUES (
-       ?, ?, '途记演示', ?, 'FEMALE', '1995-08-12', '330000', '330100',
-       '杭州萧山', '把每一次出发，都藏进清川。', '13812346621', 'free',
+       ?, ?, '途记演示', ?, 'FEMALE',
+       '把每一次出发，都藏进清川。', '13812346621', 'free',
        50, 1800, 18, 48, NOW(6), NOW(6)
      )`,
     [
@@ -247,29 +238,7 @@ async function seedUser(ds: DataSource) {
     ],
   );
 
-  // 旅行身份字典 + 演示用户身份
-  const identities = [
-    ['backpacker', '背包客', 1],
-    ['foodie', '美食猎人', 2],
-    ['vacationer', '度假党', 3],
-    ['photo', '摄影控', 4],
-    ['culture', '人文探索', 5],
-    ['outdoor', '户外徒步', 6],
-    ['family', '亲子同游', 7],
-  ];
-  for (const [code, name, sort] of identities) {
-    await ds.query(
-      `INSERT INTO travel_identity_dict (code, name, sort) VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE name=VALUES(name), sort=VALUES(sort)`,
-      [code, name, sort],
-    );
-  }
-  await ds.query(`DELETE FROM user_identities WHERE userId = ?`, [USER_ID]);
-  await ds.query(
-    `INSERT INTO user_identities (userId, identityCode) VALUES (?, 'backpacker'), (?, 'foodie')`,
-    [USER_ID, USER_ID],
-  );
-  console.log('✓ user + profile + identities');
+  console.log('✓ user + profile');
 }
 
 /** 会员套餐种子（运营配置，幂等 upsert，按 code 去重）。 */
@@ -356,8 +325,6 @@ async function seedJourneys(ctx: Ctx) {
       startDate: ymdPlus(2),
       endDate: ymdPlus(5),
       status: 'planned',
-      themeTags: ['island', 'food', 'city_walk'],
-      companions: ['friends'],
       budgetAmount: 350000,
       isPublic: false,
       syncVersion: 2,
@@ -374,8 +341,6 @@ async function seedJourneys(ctx: Ctx) {
       startDate: ymdPlus(14),
       endDate: ymdPlus(18),
       status: 'planned',
-      themeTags: ['island', 'relax'],
-      companions: ['couple'],
       budgetAmount: 680000,
       isPublic: false,
       syncVersion: 1,
@@ -391,8 +356,6 @@ async function seedJourneys(ctx: Ctx) {
       startDate: '2025-10-18',
       endDate: '2025-10-25',
       status: 'ongoing',
-      themeTags: ['culture', 'city_walk', 'food'],
-      companions: ['couple'],
       budgetAmount: 420000,
       isPublic: true,
       syncVersion: 8,
@@ -408,8 +371,6 @@ async function seedJourneys(ctx: Ctx) {
       startDate: '2025-09-02',
       endDate: '2025-09-07',
       status: 'finished',
-      themeTags: ['hiking', 'relax'],
-      companions: ['friends'],
       budgetAmount: 550000,
       isPublic: false,
       syncVersion: 12,
@@ -425,8 +386,6 @@ async function seedJourneys(ctx: Ctx) {
       startDate: '2025-08-11',
       endDate: '2025-08-16',
       status: 'finished',
-      themeTags: ['relax', 'food'],
-      companions: ['couple', 'pet'],
       budgetAmount: 500000,
       isPublic: false,
       syncVersion: 9,
@@ -444,19 +403,16 @@ async function seedPlans(ctx: Ctx) {
         {
           clientId: 'xm_p1',
           name: '鼓浪屿',
-          note: '坐轮渡过去，逛日光岩',
           coverUrl: IMG.gulangyu,
         },
         {
           clientId: 'xm_p2',
           name: '南普陀寺',
-          note: '早上去，避开人潮',
           coverUrl: IMG.temple,
         },
         {
           clientId: 'xm_p3',
           name: '曾厝垵',
-          note: '海鲜大排档',
           coverUrl: IMG.market,
         },
       ],
@@ -472,13 +428,11 @@ async function seedPlans(ctx: Ctx) {
         {
           clientId: 'sy_p1',
           name: '亚龙湾',
-          note: '潜水 / 躺沙滩',
           coverUrl: IMG.beach,
         },
         {
           clientId: 'sy_p2',
           name: '天涯海角',
-          note: '经典打卡',
         },
       ],
       checks: DOMESTIC_CHECKS([true, false, false, false]),
@@ -492,25 +446,21 @@ async function seedPlans(ctx: Ctx) {
         {
           clientId: 'hz_p1',
           name: '断桥残雪',
-          note: '清晨人少，拍西湖倒影',
           coverUrl: IMG.westlake,
         },
         {
           clientId: 'hz_p2',
           name: '灵隐寺',
-          note: '飞来峰一线天',
           coverUrl: IMG.temple,
         },
         {
           clientId: 'hz_p3',
           name: '雷峰塔',
-          note: '傍晚登塔看夕阳',
           coverUrl: IMG.temple,
         },
         {
           clientId: 'hz_p4',
           name: '龙井村',
-          note: 'Day4 喝茶',
         },
       ],
       checks: DOMESTIC_CHECKS([true, true, true, true]),
@@ -524,25 +474,21 @@ async function seedPlans(ctx: Ctx) {
         {
           clientId: 'zj_p1',
           name: '天门山',
-          note: '玻璃栈道',
           coverUrl: IMG.cliff,
         },
         {
           clientId: 'zj_p2',
           name: '袁家界',
-          note: '阿凡达取景地',
           coverUrl: IMG.mountain,
         },
         {
           clientId: 'zj_p3',
           name: '金鞭溪',
-          note: '峡谷徒步',
           coverUrl: IMG.waterfall,
         },
         {
           clientId: 'zj_p4',
           name: '黄石寨',
-          note: '看云海',
         },
       ],
       checks: DOMESTIC_CHECKS([true, true, true, true]),
@@ -553,9 +499,9 @@ async function seedPlans(ctx: Ctx) {
     ctx.plans.create({
       journeyId: J.dali,
       places: [
-        { clientId: 'dl_p1', name: '洱海', note: '骑行环湖', coverUrl: IMG.dali },
-        { clientId: 'dl_p2', name: '喜洲古镇', note: '小吃', coverUrl: IMG.town },
-        { clientId: 'dl_p3', name: '双廊', note: '看日出' },
+        { clientId: 'dl_p1', name: '洱海', coverUrl: IMG.dali },
+        { clientId: 'dl_p2', name: '喜洲古镇', coverUrl: IMG.town },
+        { clientId: 'dl_p3', name: '双廊' },
       ],
       checks: DOMESTIC_CHECKS([true, true, true, true]),
       budgetEstimate: 500000,
@@ -1034,7 +980,6 @@ async function seedGuidesFromDb(ctx: Ctx) {
 
 function buildGuidePayload(journey: Journey, entries: Entry[]) {
   const { days, nights } = nightsBetween(journey.startDate, journey.endDate);
-  const themeTags = journey.themeTags ?? [];
   const publicLoc = journey.isPublic;
 
   const withPhoto = entries.filter(
@@ -1112,8 +1057,6 @@ function buildGuidePayload(journey: Journey, entries: Entry[]) {
       endDate: journey.endDate,
       days,
       nights,
-      themeTags,
-      themeLabel: themeLabelOf(themeTags),
       isPublic: journey.isPublic,
       template: 'basic',
     },
@@ -1172,7 +1115,6 @@ async function seedBudgetsDraftsOrders(ctx: Ctx) {
         title: '成都宽窄巷子周末（草稿）',
         origin: '重庆',
         destination: '四川 · 成都',
-        themeTags: ['food', 'city_walk'],
       },
     }),
   );

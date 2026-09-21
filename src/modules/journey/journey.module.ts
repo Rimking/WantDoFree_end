@@ -11,6 +11,7 @@ import { Share } from '../../entities/share.entity';
 import { ShareEvent } from '../../entities/share-event.entity';
 import { JourneyService } from './journey.service';
 import { JourneyAggregateService } from './journey-aggregate.service';
+import { JourneyMapService } from './journey-map.service';
 import { JourneyController } from './journey.controller';
 import { ChecklistModule } from '../checklist/checklist.module';
 import { RecordingModule } from '../recording/recording.module';
@@ -36,7 +37,7 @@ import { GuideModule } from '../guide/guide.module';
     GuideModule,
   ],
   controllers: [JourneyController],
-  providers: [JourneyService, JourneyAggregateService],
+  providers: [JourneyService, JourneyAggregateService, JourneyMapService],
   exports: [JourneyService, JourneyAggregateService],
 })
 export class JourneyModule {}

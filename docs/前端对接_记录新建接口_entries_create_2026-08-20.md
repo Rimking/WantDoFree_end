@@ -1,5 +1,7 @@
 # 前端对接 · 记录新建接口：/journeys/entries/create（2026-08-20）
 
+> **2026-09-11 全局响应包裹**：所有接口返回 `{ code, data, message }`（成功 `code=2000`，失败非 2000）；下文各响应示例中的业务字段均位于 **`data`** 内。
+
 > **✅ 后端已实现并实测通过（2026-08-20）**：`POST /dream/v1/journeys/entries/create` 已上线；
 > **`/journeys/entries/sync` 已下线（404）**。本文件即最终契约，前端按下文清单实施。
 > 媒体关联方式：**上传接口返回 mediaId，create 时传 `mediaIds`，后端直接关联**（图片、语音通用）。

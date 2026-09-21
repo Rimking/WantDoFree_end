@@ -6,19 +6,20 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { Journey } from './journey.entity';
 import { Order } from './order.entity';
-import { UserIdentity } from './user-identity.entity';
 
 export type UserPlan = 'free' | 'pro';
-export type Gender = 'MALE' | 'FEMALE' | 'UNKNOWN';
+export type Gender = 'MALE' | 'FEMALE';
 export type MemberLevel = 'FREE' | 'PRO';
 export type UserRole = 'user' | 'admin';
 export type UserStatus = 'active' | 'blocked' | 'deleted';
 
 /** 用户账号、配额与个人资料。 */
 @Entity('users')
+@Index('idx_users_created_id', ['createdAt', 'id'])
 export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -47,20 +48,8 @@ export class User {
   @Column({ nullable: true, length: 512 })
   avatar?: string;
 
-  @Column({ type: 'varchar', length: 16, default: 'UNKNOWN' })
+  @Column({ type: 'varchar', length: 16, default: 'FEMALE' })
   gender: Gender;
-
-  @Column({ type: 'date', nullable: true })
-  birthday?: string;
-
-  @Column({ type: 'char', length: 6, nullable: true })
-  provinceCode?: string;
-
-  @Column({ type: 'char', length: 6, nullable: true })
-  cityCode?: string;
-
-  @Column({ type: 'varchar', length: 64, nullable: true })
-  departureCity?: string;
 
   @Column({ type: 'varchar', length: 40, nullable: true })
   bio?: string;
@@ -110,7 +99,4 @@ export class User {
 
   @OneToMany(() => Order, (o) => o.user)
   orders: Order[];
-
-  @OneToMany(() => UserIdentity, (i) => i.user)
-  identities: UserIdentity[];
 }

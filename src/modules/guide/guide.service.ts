@@ -13,8 +13,6 @@ import { Entry } from '../../entities/entry.entity';
 import { Guide } from '../../entities/guide.entity';
 import {
   normalizeExpenseCategory,
-  normalizeThemeTag,
-  themeLabelOf,
 } from '../../common/enums/catalog';
 import { MediaService } from '../media/media.service';
 import { toLegacyKind } from '../media/media.util';
@@ -55,7 +53,6 @@ type GuidePayload = {
     endDate: string;
     days: number;
     nights: number;
-    themeTags: string[];
     isPublic: boolean;
     template: string;
   };
@@ -275,9 +272,6 @@ export class GuideService {
       journey.startDate,
       journey.endDate,
     );
-    const themeTags = (journey.themeTags ?? [])
-      .map((t) => normalizeThemeTag(t) ?? t)
-      .filter(Boolean);
 
     const withPhoto = entries.filter((e) => this.hasPhoto(e));
     const rest = entries.filter((e) => !withPhoto.includes(e));
@@ -358,7 +352,6 @@ export class GuideService {
         endDate: journey.endDate,
         days,
         nights,
-        themeTags,
         isPublic: journey.isPublic,
         template,
       },
@@ -368,7 +361,6 @@ export class GuideService {
   private toGuideResponse(guide: Guide) {
     const payload = guide.payload as GuidePayload | null;
     const cities = payload?.cities ?? [];
-    const themeTags = payload?.meta?.themeTags ?? [];
     const byCategory = payload?.expense?.byCategory ?? [];
     const totalCostCent = guide.totalCost ?? payload?.expense?.totalCent ?? 0;
     const coverUrl = guide.coverUrl ?? null;
@@ -383,7 +375,6 @@ export class GuideService {
       nights: payload?.meta?.nights ?? null,
       cityCount: cities.length,
       cities,
-      themeLabel: themeLabelOf(themeTags),
       highlights: payload?.highlights ?? [],
       coverUrl,
       cover: coverUrl,

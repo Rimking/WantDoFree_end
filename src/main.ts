@@ -7,10 +7,11 @@ import {
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { isProd } from './common/env';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const isProd = process.env.NODE_ENV === 'production';
+  const prod = isProd();
 
   app.setGlobalPrefix('dream');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
@@ -28,7 +29,7 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   const corsOrigin = process.env.CORS_ORIGIN;
-  if (isProd) {
+  if (prod) {
     if (!corsOrigin || corsOrigin === '*') {
       // eslint-disable-next-line no-console
       console.warn(
@@ -50,7 +51,7 @@ async function bootstrap() {
     });
   }
 
-  if (!isProd) {
+  if (!prod) {
     const doc = new DocumentBuilder()
       .setTitle('途记 API')
       .setVersion('1')
@@ -66,8 +67,12 @@ async function bootstrap() {
   await app.listen(process.env.PORT ?? 3000);
   // eslint-disable-next-line no-console
   console.log(
-    `🚀 途记后端已启动: http://localhost:${process.env.PORT ?? 3000}${isProd ? '' : '/dream/docs'}  [STORAGE_DRIVER=${process.env.STORAGE_DRIVER || 'local'}]`,
+    `🚀 途记后端已启动: http://localhost:${process.env.PORT ?? 3000}${prod ? '' : '/dream/docs'}  [STORAGE_DRIVER=${process.env.STORAGE_DRIVER || 'local'}]`,
   );
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  // 启动期异常（JWT_SECRET 缺失、DB 连不上等）必须清晰退出，而非静默 unhandled rejection
+  console.error('❌ 启动失败:', err?.message ?? err);
+  process.exit(1);
+});

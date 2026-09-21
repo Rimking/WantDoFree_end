@@ -7,8 +7,6 @@ import { User } from '../../entities/user.entity';
 import { YearBudget } from '../../entities/year-budget.entity';
 import { Journey } from '../../entities/journey.entity';
 import { Location } from '../../entities/location.entity';
-import { TravelIdentityDict } from '../../entities/travel-identity-dict.entity';
-import { UserIdentity } from '../../entities/user-identity.entity';
 import { MemberPlan } from '../../entities/member-plan.entity';
 import { StorageModule } from '../../infrastructure/storage/storage.module';
 import { MemberBenefitModule } from '../membership/member-benefit.module';
@@ -20,8 +18,6 @@ import { MemberBenefitModule } from '../membership/member-benefit.module';
       YearBudget,
       Journey,
       Location,
-      TravelIdentityDict,
-      UserIdentity,
       MemberPlan,
     ]),
     StorageModule,

@@ -132,7 +132,6 @@ async function main(): Promise<void> {
       destination: '稻城',
       startDate: '2026-08-01',
       endDate: '2026-08-05',
-      themeTags: ['nature'],
       coverUrl: 'j.jpg',
     }),
   );

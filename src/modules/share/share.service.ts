@@ -16,7 +16,6 @@ import { Journey } from '../../entities/journey.entity';
 import { Guide } from '../../entities/guide.entity';
 import { User } from '../../entities/user.entity';
 import { ShareEvent } from '../../entities/share-event.entity';
-import { normalizeThemeTag, themeLabelOf } from '../../common/enums/catalog';
 import { normalizeGuideTemplateId } from '../../common/handbook';
 import { MemberBenefitService } from '../membership/member-benefit.service';
 import { WechatService } from '../../infrastructure/wechat/wechat.service';
@@ -187,9 +186,6 @@ export class ShareService {
       journey.startDate,
       journey.endDate,
     );
-    const themeTags = (journey.themeTags ?? [])
-      .map((t) => normalizeThemeTag(t) ?? t)
-      .filter(Boolean);
     const highlights = (payload?.highlights ?? []).map((h) => ({
       type: h.type,
       title: h.title ?? '',
@@ -219,8 +215,6 @@ export class ShareService {
         endDate: journey.endDate,
         days,
         nights,
-        themeTags,
-        themeLabel: themeLabelOf(themeTags),
         coverUrl: journey.coverUrl ?? null,
       },
       guide: {

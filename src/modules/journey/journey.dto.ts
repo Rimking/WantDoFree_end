@@ -5,57 +5,14 @@ import {
   IsDateString,
   Length,
   IsArray,
-  ArrayUnique,
   IsBoolean,
   IsInt,
   Min,
   Validate,
   ValidatorConstraint,
   ValidatorConstraintInterface,
-  ValidationArguments,
 } from 'class-validator';
-import {
-  COMPANIONS,
-  JOURNEY_STATUSES,
-  THEME_TAGS,
-  normalizeCompanion,
-  normalizeStatus,
-  normalizeThemeTag,
-} from '../../common/enums/catalog';
-
-@ValidatorConstraint({ name: 'themeTagsNorm', async: false })
-class ThemeTagsConstraint implements ValidatorConstraintInterface {
-  validate(value: unknown) {
-    if (value == null) return true;
-    if (!Array.isArray(value)) return false;
-    return value.every((v) => typeof v === 'string' && normalizeThemeTag(v));
-  }
-  defaultMessage() {
-    return `themeTags must be subset of ${THEME_TAGS.join(',')} (or Chinese aliases)`;
-  }
-}
-
-@ValidatorConstraint({ name: 'companionsNorm', async: false })
-class CompanionsConstraint implements ValidatorConstraintInterface {
-  validate(value: unknown) {
-    if (value == null) return true;
-    if (!Array.isArray(value)) return false;
-    if (!value.every((v) => typeof v === 'string' && normalizeCompanion(v))) {
-      return false;
-    }
-    const keys = value.map((v) => normalizeCompanion(v)!);
-    // 「自己」与其它互斥
-    if (keys.includes('solo') && keys.length > 1) return false;
-    return true;
-  }
-  defaultMessage(args: ValidationArguments) {
-    const v = args.value;
-    if (Array.isArray(v) && v.map((x) => normalizeCompanion(x)).includes('solo') && v.length > 1) {
-      return 'companions: solo cannot combine with others';
-    }
-    return `companions must be subset of ${COMPANIONS.join(',')} (or Chinese aliases)`;
-  }
-}
+import { JOURNEY_STATUSES, normalizeStatus } from '../../common/enums/catalog';
 
 @ValidatorConstraint({ name: 'statusNorm', async: false })
 class StatusConstraint implements ValidatorConstraintInterface {
@@ -84,25 +41,6 @@ export class CreateJourneyDto {
   /** 兼容旧字段 cover */
   @IsOptional() @IsString() cover?: string;
 
-  @IsOptional()
-  @IsArray()
-  @ArrayUnique()
-  @Validate(ThemeTagsConstraint)
-  themeTags?: string[];
-
-  /** 兼容前端 themes */
-  @IsOptional()
-  @IsArray()
-  @ArrayUnique()
-  @Validate(ThemeTagsConstraint)
-  themes?: string[];
-
-  @IsOptional()
-  @IsArray()
-  @ArrayUnique()
-  @Validate(CompanionsConstraint)
-  companions?: string[];
-
   @IsOptional() @IsInt() @Min(0) budgetAmount?: number;
   /** 兼容前端 budgetLimit */
   @IsOptional() @IsInt() @Min(0) budgetLimit?: number;
@@ -116,7 +54,6 @@ export class CreateJourneyDto {
     clientId?: string;
     id?: string;
     name: string;
-    note?: string;
     coverUrl?: string;
     cover?: string;
     lat?: number;
@@ -148,24 +85,6 @@ export class UpdateJourneyDto {
   @IsOptional() @IsString() coverUrl?: string;
   @IsOptional() @IsString() cover?: string;
 
-  @IsOptional()
-  @IsArray()
-  @ArrayUnique()
-  @Validate(ThemeTagsConstraint)
-  themeTags?: string[];
-
-  @IsOptional()
-  @IsArray()
-  @ArrayUnique()
-  @Validate(ThemeTagsConstraint)
-  themes?: string[];
-
-  @IsOptional()
-  @IsArray()
-  @ArrayUnique()
-  @Validate(CompanionsConstraint)
-  companions?: string[];
-
   @IsOptional() @IsInt() @Min(0) budgetAmount?: number;
   @IsOptional() @IsInt() @Min(0) budgetLimit?: number;
   @IsOptional() @IsBoolean() isPublic?: boolean;
@@ -183,7 +102,6 @@ export class UpsertPlanDto {
     clientId?: string;
     id?: string;
     name: string;
-    note?: string;
     coverUrl?: string;
     cover?: string;
     lat?: number;
@@ -224,7 +142,6 @@ export class PatchPlanDto {
     clientId?: string;
     id?: string;
     name: string;
-    note?: string;
     coverUrl?: string;
     cover?: string;
     lat?: number;

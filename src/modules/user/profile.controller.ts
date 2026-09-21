@@ -39,17 +39,6 @@ export class ProfileController {
     return this.user.avatarPresign(u.id, dto);
   }
 
-  @Get('identities')
-  identities() {
-    return this.user.listIdentities();
-  }
-
-  /** 省市区联动选项（校验用白名单同源） */
-  @Get('regions')
-  regions() {
-    return this.user.listRegions();
-  }
-
   @Post('nickname/check')
   nicknameCheck(
     @CurrentUser() u: { id: string },

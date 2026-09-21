@@ -18,6 +18,13 @@ export class SetRenewalDto {
   autoRenew: boolean;
 }
 
+/** mock 支付完成：需携带调试密钥（匹配 DEV_PAY_NOTIFY_SECRET，见 ENABLE_DEV_PAY）。 */
+export class PayMembershipOrderDto {
+  @IsOptional()
+  @IsString()
+  secret?: string;
+}
+
 /** 申请退款（mock）：可指定订单号，缺省取当前用户最近一笔已支付会员订单。 */
 export class RefundDto {
   @IsOptional()

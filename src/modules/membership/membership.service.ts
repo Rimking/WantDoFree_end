@@ -10,6 +10,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { DataSource, Repository, In } from 'typeorm';
 import { User } from '../../entities/user.entity';
 import { Order } from '../../entities/order.entity';
@@ -39,6 +40,7 @@ export class MembershipService {
     private readonly plans: Repository<MemberPlan>,
     private readonly benefit: MemberBenefitService,
     private readonly dataSource: DataSource,
+    private readonly config: ConfigService,
     @Optional()
     @Inject(forwardRef(() => InviteService))
     private readonly invite?: InviteService,
@@ -209,7 +211,6 @@ export class MembershipService {
     );
     return {
       orderNo: order.id,
-      mockPayToken: `mock_${order.id}`,
       amountCent: effectivePriceCent,
       planCode: plan.code,
       periodDays: plan.periodDays,
@@ -219,7 +220,24 @@ export class MembershipService {
     };
   }
 
-  async payOrder(orderNo: string, userId: string) {
+  /**
+   * mock 支付三道闸（与 payment.completeMockPayment 同规格）：
+   * 1) DevOnlyGuard 已限定非生产 + ENABLE_DEV_PAY=true（controller 层）；
+   * 2) 真实商户已配置时拒绝 mock 支付；
+   * 3) 必须携带匹配 DEV_PAY_NOTIFY_SECRET 的调试密钥（未配置即拒绝，fail-closed）。
+   */
+  private assertMockPayAllowed(secret?: string) {
+    if (this.config.get('WX_MCH_ID')) {
+      throw new ForbiddenException('真实商户已配置，禁止使用 mock 支付');
+    }
+    const expected = process.env.DEV_PAY_NOTIFY_SECRET;
+    if (!expected || !secret || secret !== expected) {
+      throw new ForbiddenException('invalid DEV_PAY_NOTIFY_SECRET');
+    }
+  }
+
+  async payOrder(orderNo: string, userId: string, secret?: string) {
+    this.assertMockPayAllowed(secret);
     const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: orderNo },

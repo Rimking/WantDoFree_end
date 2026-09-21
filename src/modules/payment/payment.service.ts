@@ -54,8 +54,9 @@ export class PaymentService {
     if (this.pay.isConfigured()) {
       throw new ForbiddenException('真实商户已配置，禁止使用 mock 支付回调');
     }
-    const expected = process.env.DEV_PAY_NOTIFY_SECRET ?? 'tuji_dev_pay';
-    if (!secret || secret !== expected) {
+    // 密钥未配置时一律拒绝（fail-closed），不得回落默认值
+    const expected = process.env.DEV_PAY_NOTIFY_SECRET;
+    if (!expected || !secret || secret !== expected) {
       throw new ForbiddenException('invalid DEV_PAY_NOTIFY_SECRET');
     }
     return this.fulfillOrder(orderId, transactionId ?? `mock_tx_${Date.now()}`);

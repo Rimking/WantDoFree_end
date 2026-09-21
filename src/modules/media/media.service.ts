@@ -7,11 +7,12 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Like, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Like, Repository } from 'typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 import { Media } from '../../entities/media.entity';
 import { Entry } from '../../entities/entry.entity';
 import { Journey } from '../../entities/journey.entity';
@@ -57,6 +58,8 @@ type LegacyConfirmDto = {
 
 @Injectable()
 export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
+
   constructor(
     @InjectRepository(Media) private readonly media: Repository<Media>,
     @InjectRepository(Entry) private readonly entries: Repository<Entry>,
@@ -68,6 +71,7 @@ export class MediaService {
     private readonly quota: QuotaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
   toDto(m: Media) {
@@ -353,22 +357,21 @@ export class MediaService {
     return { mediaId: m.id, reused: false, url: m.url, sizeBytes: file.size };
   }
 
-  /** 头像 / 封面写回主表（local-upload 与 confirm 均可调用，幂等） */
+  /** 头像 / 封面写回主表（local-upload 与 confirm 均可调用，幂等）；传 manager 时随事务提交 */
   private async applyOwnerSideEffects(
     userId: string,
     m: { ownerType: string; ownerId: string | null; url?: string | null },
+    manager?: EntityManager,
   ) {
     if (!m.url) return;
+    const runner = manager ?? this.users.manager;
     if (m.ownerType === 'avatar') {
       if (!m.ownerId) return;
-      await this.users.update({ id: userId }, { avatar: m.url });
+      await runner.update(User, { id: userId }, { avatar: m.url });
     }
     if (m.ownerType === 'journey_cover') {
       if (!m.ownerId) return;
-      await this.journeys.update(
-        { id: m.ownerId, userId },
-        { coverUrl: m.url },
-      );
+      await runner.update(Journey, { id: m.ownerId, userId }, { coverUrl: m.url });
     }
   }
 
@@ -409,12 +412,14 @@ export class MediaService {
             1,
             m.durationSec ?? Math.ceil(sizeNumber(m.sizeBytes) / 1024),
           );
-    await this.quota.assertWithin(userId, toQuotaKind(kind), usage);
-    await this.quota.addUsage(userId, toQuotaKind(kind), usage);
 
-    m.status = 'active';
-    await this.media.save(m);
-    await this.applyOwnerSideEffects(userId, m);
+    // 配额扣减与状态置 active 同事务：回滚时配额不会被白扣
+    await this.dataSource.transaction(async (manager) => {
+      await this.quota.consumeOrFail(userId, toQuotaKind(kind), usage, manager);
+      m.status = 'active';
+      await manager.save(m);
+      await this.applyOwnerSideEffects(userId, m, manager);
+    });
 
     return this.toDto(m);
   }
@@ -429,23 +434,46 @@ export class MediaService {
       kind === 'image'
         ? 1
         : Math.max(1, Math.ceil((dto.size ?? 0) / 1024));
-    await this.quota.assertWithin(userId, toQuotaKind(kind), usage);
-    await this.quota.addUsage(userId, toQuotaKind(kind), usage);
 
-    const row = await this.media.save(
-      this.media.create({
-        ownerType: 'entry',
-        ownerId: dto.entryId,
-        kind,
-        url: dto.url,
-        mime: kind === 'image' ? 'image/jpeg' : 'audio/m4a',
-        sizeBytes: dto.size ?? 0,
-        status: 'active',
-        driver: this.drivers.currentName(),
-        createdBy: userId,
-      }),
-    );
+    const row = await this.dataSource.transaction(async (manager) => {
+      await this.quota.consumeOrFail(userId, toQuotaKind(kind), usage, manager);
+      return manager.save(
+        manager.create(Media, {
+          ownerType: 'entry',
+          ownerId: dto.entryId,
+          kind,
+          url: dto.url,
+          mime: kind === 'image' ? 'image/jpeg' : 'audio/m4a',
+          sizeBytes: dto.size ?? 0,
+          status: 'active',
+          driver: this.drivers.currentName(),
+          createdBy: userId,
+        }),
+      );
+    });
     return this.toDto(row);
+  }
+
+  /**
+   * 删除无引用的物理文件（软删媒体后调用）。
+   * 同一 storageKey 可能被多条媒体共享（checksum 去重复用 URL），
+   * 仍有活跃引用时跳过；删除失败仅告警，不影响主流程。
+   */
+  async deleteStorageFilesIfUnreferenced(keys: Array<string | null | undefined>) {
+    const uniq = [...new Set(keys.filter((k): k is string => !!k))];
+    for (const key of uniq) {
+      const refs = await this.media.count({
+        where: { storageKey: key, deletedAt: IsNull() },
+      });
+      if (refs > 0) continue;
+      try {
+        await this.drivers.get().delete(key);
+      } catch (e: unknown) {
+        this.logger.warn(
+          `物理文件删除失败（忽略）: ${key}: ${e instanceof Error ? e.message : e}`,
+        );
+      }
+    }
   }
 
   async findOwnedFile(userId: string, storageKey: string) {

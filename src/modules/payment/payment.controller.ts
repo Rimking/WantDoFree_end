@@ -11,6 +11,7 @@ import { CreateOrderDto, DevPayNotifyDto } from './payment.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { DevOnlyGuard } from '../../common/guards/dev-only.guard';
+import { SkipResponseWrap } from '../../common/decorators/skip-response-wrap.decorator';
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
@@ -47,8 +48,10 @@ export class PayNotifyController {
 
   /**
    * 微信平台回调占位。未配置验签前一律拒绝，避免被刷配额。
+   * 响应结构由微信平台定义，不套用统一包裹（否则回调会被判为失败重试）。
    */
   @Post('notify')
+  @SkipResponseWrap()
   notify(
     @Headers() headers: Record<string, string>,
     @Req() req: { body: any; rawBody?: string },

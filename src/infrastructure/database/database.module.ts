@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
+import { isProd } from '../../common/env';
 
 /**
  * TypeORM 数据库连接（MySQL）。
@@ -23,8 +24,8 @@ import { join } from 'path';
         database: config.get('DB_DATABASE', 'tuji'),
         charset: 'utf8mb4',
         autoLoadEntities: true,
-        synchronize: config.get('NODE_ENV') !== 'production',
-        migrationsRun: config.get('NODE_ENV') === 'production',
+        synchronize: !isProd(),
+        migrationsRun: isProd(),
         migrations: [join(__dirname, '../../migrations/*.js')],
         timezone: '+08:00',
         extra: { connectionLimit: 10 },

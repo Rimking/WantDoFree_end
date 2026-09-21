@@ -4,6 +4,7 @@ import { StatsRangeQueryDto } from './stats.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { StatsRateLimitGuard } from './stats-rate-limit.guard';
+import { ok } from '../../common/response';
 
 /**
  * 统计 API：有参 POST；storage 无参可 GET。
@@ -36,10 +37,8 @@ export class StatsController {
       this.stats.storage(u.id),
     ]);
     const range = overview.range;
-    return {
-      code: 0 as const,
-      message: 'ok',
-      data: {
+    return ok(
+      {
         range,
         overview: overview.data,
         expenses: expenses.data,
@@ -48,7 +47,8 @@ export class StatsController {
         content: content.data,
         storage: storage.data,
       },
-    };
+      'ok',
+    );
   }
 
   @Post('overview')

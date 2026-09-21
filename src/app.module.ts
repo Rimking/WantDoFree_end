@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ResponseWrapInterceptor } from './common/interceptors/response-wrap.interceptor';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { WechatModule } from './infrastructure/wechat/wechat.module';
 import { StorageModule } from './infrastructure/storage/storage.module';
@@ -22,6 +24,7 @@ import { MemberBenefitModule } from './modules/membership/member-benefit.module'
 import { ShareModule } from './modules/share/share.module';
 import { InviteModule } from './modules/invite/invite.module';
 import { FootprintModule } from './modules/footprint/footprint.module';
+import { ProgressModule } from './modules/progress/progress.module';
 
 @Module({
   imports: [
@@ -48,6 +51,11 @@ import { FootprintModule } from './modules/footprint/footprint.module';
     ShareModule,
     InviteModule,
     FootprintModule,
+    ProgressModule,
+  ],
+  providers: [
+    // 全局兜底：所有接口响应统一 { code, data, message }（见 common/response.ts）
+    { provide: APP_INTERCEPTOR, useClass: ResponseWrapInterceptor },
   ],
 })
 export class AppModule {}

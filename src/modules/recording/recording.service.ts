@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
- 
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { Journey } from '../../entities/journey.entity';
 import { Entry } from '../../entities/entry.entity';
@@ -227,7 +227,7 @@ export class RecordingService {
       this.resolveExpenseLines(e);
 
       const existing = await this.entries.findOne({
-        where: { clientId: e.clientId },
+        where: { clientId: e.clientId, journeyId: journey.id },
       });
       if (existing) continue;
       for (const m of this.collectMediaItems(e)) {
@@ -482,7 +482,13 @@ export class RecordingService {
             item.kind === 'photo'
               ? 1
               : Math.max(1, Math.ceil((item.size ?? 0) / 1024));
-          await this.quota.addUsage(userId, item.kind, amount);
+          // 传入 manager：配额扣减随事务回滚，不再「回滚后白扣」
+          await this.quota.consumeOrFail(
+            userId,
+            item.kind === 'photo' ? 'photo' : 'voice',
+            amount,
+            manager,
+          );
         }
       }
     }
@@ -683,6 +689,24 @@ export class RecordingService {
         voice: raw.voice ?? null,
       },
     };
+  }
+
+  /**
+   * 地图聚合：批量取多旅程的有定位记录（含媒体），时间升序。
+   * journeyIds 由调用方按归属圈定；这里再以 join 校验 userId 防越权。
+   */
+  async listLocatedEntriesByJourneyIds(userId: string, journeyIds: string[]) {
+    if (!journeyIds.length) return [];
+    const rows = await this.entries
+      .createQueryBuilder('e')
+      .innerJoin('e.journey', 'j', 'j.userId = :userId', { userId })
+      .innerJoinAndSelect('e.location', 'loc')
+      .where('e.journeyId IN (:...ids)', { ids: journeyIds })
+      .orderBy('COALESCE(e.recordedAt, e.createdAt)', 'ASC')
+      .addOrderBy('e.createdAt', 'ASC')
+      .getMany();
+    await this.mediaService.attachToEntries(rows);
+    return rows;
   }
 
   async listByJourney(
@@ -1047,7 +1071,10 @@ export class RecordingService {
           }
         }
         const toRemove = existing.filter((m) => !keepIds.has(m.id));
-        if (toRemove.length) await manager.remove(toRemove);
+        if (toRemove.length) {
+          await this.releaseQuotaForMedia(manager, userId, toRemove);
+          await manager.softRemove(toRemove);
+        }
       }
 
       if (patchAudios !== undefined) {
@@ -1096,7 +1123,10 @@ export class RecordingService {
           );
         }
         const toRemove = existing.filter((m) => !keepIds.has(m.id));
-        if (toRemove.length) await manager.remove(toRemove);
+        if (toRemove.length) {
+          await this.releaseQuotaForMedia(manager, userId, toRemove);
+          await manager.softRemove(toRemove);
+        }
       }
 
       if (dto.location !== undefined) {
@@ -1187,13 +1217,51 @@ export class RecordingService {
     });
   }
 
+  /**
+   * 归还一组媒体的配额（仅 active 行计入；口径与消费一致：
+   * 图片=1，语音=max(1, durationSec ?? ceil(sizeBytes/1024))）。
+   */
+  private async releaseQuotaForMedia(
+    manager: EntityManager,
+    userId: string,
+    rows: Media[],
+  ) {
+    let photo = 0;
+    let voiceSec = 0;
+    for (const m of rows) {
+      if (m.status !== 'active') continue;
+      if ((normalizeMediaKind(m.kind) ?? 'image') === 'image') {
+        photo += 1;
+      } else {
+        voiceSec += Math.max(
+          1,
+          m.durationSec ?? Math.ceil(sizeNumber(m.sizeBytes) / 1024),
+        );
+      }
+    }
+    if (photo) await this.quota.release(userId, 'photo', photo, manager);
+    if (voiceSec) await this.quota.release(userId, 'voice', voiceSec, manager);
+  }
+
+  /** 删除记录：媒体软删 + 配额归还 + 物理文件清理（无引用时），entry 由 DB 级联带走 expenses/location */
   async removeRecord(userId: string, recordId: string) {
     const entry = await this.entries.findOne({ where: { id: recordId } });
     if (!entry) {
       throw new NotFoundException({ code: '40401', message: '内容已不存在' });
     }
     await this.requireOwnedJourney(userId, entry.journeyId);
-    await this.entries.remove(entry);
+
+    const removedKeys = await this.dataSource.transaction(async (manager) => {
+      const mediaRows = await manager.find(Media, {
+        where: { ownerType: 'entry', ownerId: entry.id, deletedAt: IsNull() },
+      });
+      await this.releaseQuotaForMedia(manager, userId, mediaRows);
+      if (mediaRows.length) await manager.softRemove(mediaRows);
+      // expenses/location 由外键 ON DELETE CASCADE 清理
+      await this.entries.remove(entry);
+      return mediaRows.map((m) => m.storageKey);
+    });
+    await this.mediaService.deleteStorageFilesIfUnreferenced(removedKeys);
     return { deleted: true, id: recordId };
   }
 
@@ -1218,7 +1286,22 @@ export class RecordingService {
     }
 
     const rows = await qb.getMany();
-    if (rows.length) await this.entries.remove(rows);
+    if (!rows.length) return { deleted: 0, ids: [] };
+
+    const removedKeys = await this.dataSource.transaction(async (manager) => {
+      const mediaRows = await manager.find(Media, {
+        where: {
+          ownerType: 'entry',
+          ownerId: In(rows.map((r) => r.id)),
+          deletedAt: IsNull(),
+        },
+      });
+      await this.releaseQuotaForMedia(manager, userId, mediaRows);
+      if (mediaRows.length) await manager.softRemove(mediaRows);
+      await this.entries.remove(rows);
+      return mediaRows.map((m) => m.storageKey);
+    });
+    await this.mediaService.deleteStorageFilesIfUnreferenced(removedKeys);
     return { deleted: rows.length, ids: rows.map((r) => r.id) };
   }
 

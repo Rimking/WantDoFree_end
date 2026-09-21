@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { createHash } from 'crypto';
 import { Journey } from '../../entities/journey.entity';
 import { JourneyPlan } from '../../entities/journey-plan.entity';
@@ -28,9 +28,7 @@ import { PlanPlaceCreateBodyDto } from './journey-api.dto';
 import {
   DEFAULT_PLAN_CHECKS,
   JourneyStatus,
-  normalizeCompanion,
   normalizeStatus,
-  normalizeThemeTag,
 } from '../../common/enums/catalog';
 import { formatDateTime } from '../../common/datetime.util';
 import {
@@ -78,23 +76,11 @@ export class JourneyService {
     return this.owned(userId, id);
   }
 
-  private normalizeTags(raw?: string[]) {
-    if (!raw) return undefined;
-    return [...new Set(raw.map((t) => normalizeThemeTag(t)!))];
-  }
-
-  private normalizeCompanions(raw?: string[]) {
-    if (!raw) return undefined;
-    return [...new Set(raw.map((c) => normalizeCompanion(c)!))];
-  }
-
   private normalizeWrite(
     dto: CreateJourneyDto | UpdateJourneyDto,
   ): Partial<Journey> {
     const coverUrl = dto.coverUrl ?? dto.cover;
     const budgetAmount = dto.budgetAmount ?? dto.budgetLimit;
-    const themeTags = this.normalizeTags(dto.themeTags ?? dto.themes);
-    const companions = this.normalizeCompanions(dto.companions);
 
     const out: Partial<Journey> = {};
     if ('title' in dto && dto.title !== undefined) out.title = dto.title;
@@ -104,8 +90,6 @@ export class JourneyService {
     }
     if ('endDate' in dto && dto.endDate !== undefined) out.endDate = dto.endDate;
     if (coverUrl !== undefined) out.coverUrl = coverUrl;
-    if (themeTags !== undefined) out.themeTags = themeTags;
-    if (companions !== undefined) out.companions = companions;
     if (budgetAmount !== undefined) out.budgetAmount = budgetAmount;
     if ('isPublic' in dto && dto.isPublic !== undefined) {
       out.isPublic = dto.isPublic;
@@ -299,16 +283,12 @@ export class JourneyService {
     const snap = await this.expenseSnapshot(j.id);
     const { days, nights } = this.nightsBetween(j.startDate, j.endDate);
     const recordCount = await this.entryCount(j.id);
-    const plan = await this.ensurePlan(j.id);
+    // 只读：列表是高频读路径，缺失 plan 渲染为空态（补建走写路径/补偿脚本），
+    // 不在此处 ensurePlan 写库（旧实现每次列表都可能 INSERT plan+清单且有并发竞争）
+    const plan = await this.plans.findOne({ where: { journeyId: j.id } });
     const placeCount = await this.placeCount(j.id, plan);
     const { planProgress, confirmedCount, checkTotal } =
       await this.planProgressOf(j.id, plan);
-    const themeTags = (j.themeTags ?? [])
-      .map((t) => normalizeThemeTag(t) ?? t)
-      .filter(Boolean);
-    const companions = (j.companions ?? [])
-      .map((c) => normalizeCompanion(c) ?? c)
-      .filter(Boolean);
     const status = normalizeStatus(j.status) ?? j.status;
     const displayStatus = this.resolveDisplayStatus(
       status,
@@ -321,9 +301,6 @@ export class JourneyService {
       status,
       displayStatus,
       destination: j.destination ?? null,
-      themeTags,
-      themes: themeTags,
-      companions,
       budgetAmount: j.budgetAmount ?? null,
       budgetLimit: j.budgetAmount ?? null,
       coverUrl: j.coverUrl ?? null,
@@ -358,8 +335,6 @@ export class JourneyService {
       endDate: item.endDate,
       status: item.status,
       displayStatus: item.displayStatus,
-      themeTags: item.themeTags ?? [],
-      companions: item.companions ?? [],
       budgetAmount: item.budgetAmount ?? null,
       createdAt: formatDateTime(item.createdAt),
       updatedAt: formatDateTime(item.updatedAt),
@@ -382,7 +357,6 @@ export class JourneyService {
       status,
       displayStatus,
       budgetAmount: j.budgetAmount ?? null,
-      themeTags: (j.themeTags ?? []).map((t) => normalizeThemeTag(t) ?? t).filter(Boolean),
       placeCount,
     };
   }
@@ -400,9 +374,6 @@ export class JourneyService {
       endDate: j.endDate,
       status,
       displayStatus: this.resolveDisplayStatus(status, j.startDate, j.endDate),
-      companions: (j.companions ?? [])
-        .map((c) => normalizeCompanion(c) ?? c)
-        .filter(Boolean),
     };
   }
 
@@ -488,7 +459,6 @@ export class JourneyService {
       endDate: item.endDate,
       status: item.status,
       displayStatus: item.displayStatus,
-      companions: item.companions ?? [],
       createdAt: formatDateTime(item.createdAt),
       /** 首页「最近攻略」排序与 30 天空态判断 */
       updatedAt: formatDateTime(item.updatedAt),
@@ -507,11 +477,13 @@ export class JourneyService {
     } as PatchPlanDto);
   }
 
-  private async ensurePlan(journeyId: string) {
-    let plan = await this.plans.findOne({ where: { journeyId } });
+  /** ensurePlan：缺失则建 plan + 播种默认清单；传 manager 时随调用方事务提交 */
+  private async ensurePlan(journeyId: string, manager?: EntityManager) {
+    const runner = manager ?? this.plans.manager;
+    let plan = await runner.findOne(JourneyPlan, { where: { journeyId } });
     if (!plan) {
-      plan = await this.plans.save(
-        this.plans.create({
+      plan = await runner.save(
+        runner.create(JourneyPlan, {
           journeyId,
           places: [],
           checks: DEFAULT_PLAN_CHECKS.map((c) => ({ ...c })),
@@ -519,7 +491,7 @@ export class JourneyService {
         }),
       );
     }
-    await this.checklist.seedDefaults(journeyId);
+    await this.checklist.seedDefaults(journeyId, manager);
     return plan;
   }
 
@@ -627,7 +599,6 @@ export class JourneyService {
     return {
       clientId,
       name: String(p.name ?? p.locationName ?? '').trim(),
-      note: p.note,
       coverUrl: p.coverUrl ?? p.cover ?? images?.[0],
       lat: Number.isFinite(lat as number) ? (lat as number) : null,
       lng: Number.isFinite(lng as number) ? (lng as number) : null,
@@ -685,7 +656,6 @@ export class JourneyService {
     const has = (...ks: string[]) => ks.some((k) => keys.has(k));
     const patch: Partial<PlanPlace> = {};
     if (has('name', 'locationName')) patch.name = incoming.name;
-    if (has('note')) patch.note = incoming.note;
     if (has('coverUrl', 'cover')) patch.coverUrl = incoming.coverUrl;
     if (has('category')) patch.category = incoming.category;
     if (has('locationName', 'address')) patch.locationName = incoming.locationName;
@@ -719,7 +689,6 @@ export class JourneyService {
         id: p.clientId,
         clientId: p.clientId,
         name: p.name,
-        note: p.note ?? null,
         coverUrl: p.coverUrl ?? p.images?.[0] ?? null,
         cover: p.coverUrl ?? p.images?.[0] ?? null,
         lat: p.lat ?? null,
@@ -762,35 +731,38 @@ export class JourneyService {
     }
 
     const data = this.normalizeWrite(dto);
-    const j = await this.journeys.save(
-      this.journeys.create({
-        ...data,
-        userId,
-        clientId: dto.clientId,
-        origin: dto.origin,
-        title: dto.title,
-        startDate: dto.startDate,
-        endDate: dto.endDate,
-        status: 'planned',
-        isPublic: dto.isPublic ?? false,
-        syncVersion: 1,
-      }),
-    );
-    const plan = await this.ensurePlan(j.id);
-    const seedRaw = dto.places?.length ? dto.places : [];
-    if (seedRaw.length) {
-      plan.places = this.mergePlacesByClientId(
-        plan.places ?? [],
-        seedRaw.map((p, i) => this.normalizePlaceInput(p as any, i, j.startDate)),
+    const j = await this.dataSource.transaction(async (manager) => {
+      const saved = await manager.save(
+        manager.create(Journey, {
+          ...data,
+          userId,
+          clientId: dto.clientId,
+          origin: dto.origin,
+          title: dto.title,
+          startDate: dto.startDate,
+          endDate: dto.endDate,
+          status: 'planned',
+          isPublic: dto.isPublic ?? false,
+          syncVersion: 1,
+        }),
       );
-    }
-    if (data.budgetAmount != null) {
-      plan.budgetEstimate = data.budgetAmount;
-    }
-    if (seedRaw.length || data.budgetAmount != null) {
-      await this.plans.save(plan);
-    }
-    await this.seedPlanPlaceEntries(j, plan.places ?? []);
+      const plan = await this.ensurePlan(saved.id, manager);
+      const seedRaw = dto.places?.length ? dto.places : [];
+      if (seedRaw.length) {
+        plan.places = this.mergePlacesByClientId(
+          plan.places ?? [],
+          seedRaw.map((p, i) => this.normalizePlaceInput(p as any, i, saved.startDate)),
+        );
+      }
+      if (data.budgetAmount != null) {
+        plan.budgetEstimate = data.budgetAmount;
+      }
+      if (seedRaw.length || data.budgetAmount != null) {
+        await manager.save(plan);
+      }
+      await this.seedPlanPlaceEntries(saved, plan.places ?? [], manager);
+      return saved;
+    });
     return this.finalizeItem(j);
   }
 
@@ -931,9 +903,6 @@ export class JourneyService {
         destination: j.destination ?? null,
         startDate: j.startDate,
         endDate: j.endDate,
-        themeTags: item.themeTags,
-        themes: item.themes,
-        companions: item.companions,
         budgetAmount: item.budgetAmount,
         budgetLimit: item.budgetLimit,
         coverUrl: item.coverUrl,
@@ -956,13 +925,16 @@ export class JourneyService {
     }
     Object.assign(j, data);
     j.syncVersion += 1;
-    const saved = await this.journeys.save(j);
-    // 创建/编辑预算：journey.budgetAmount 与 plan.budgetEstimate 同步一次
-    if (data.budgetAmount !== undefined) {
-      const plan = await this.ensurePlan(id);
-      plan.budgetEstimate = data.budgetAmount ?? 0;
-      await this.plans.save(plan);
-    }
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const row = await manager.save(j);
+      // 创建/编辑预算：journey.budgetAmount 与 plan.budgetEstimate 同步一次
+      if (data.budgetAmount !== undefined) {
+        const plan = await this.ensurePlan(id, manager);
+        plan.budgetEstimate = data.budgetAmount ?? 0;
+        await manager.save(plan);
+      }
+      return row;
+    });
     return this.finalizeItem(saved);
   }
 
@@ -979,6 +951,11 @@ export class JourneyService {
     // 兼容存量 planning/ended
     const current =
       normalizeStatus(j.status) ?? (j.status as JourneyStatus);
+    // 幂等：已在目标状态（如重复「开始旅程」的 ongoing -> ongoing）直接返回详情，
+    // 不再落入 ALLOWED 迁移校验（否则被前端误报为 40001「参数错误」）
+    if (current === target) {
+      return this.finalizeItem(j);
+    }
     const allowed = ALLOWED[current] ?? [];
     if (!allowed.includes(target)) {
       throw new BadRequestException(
@@ -987,11 +964,14 @@ export class JourneyService {
     }
     j.status = target;
     j.syncVersion += 1;
-    const saved = await this.journeys.save(j);
-    if (target === 'ongoing') {
-      const plan = await this.ensurePlan(saved.id);
-      await this.seedPlanPlaceEntries(saved, plan.places ?? []);
-    }
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const row = await manager.save(j);
+      if (target === 'ongoing') {
+        const plan = await this.ensurePlan(row.id, manager);
+        await this.seedPlanPlaceEntries(row, plan.places ?? [], manager);
+      }
+      return row;
+    });
     return this.finalizeItem(saved);
   }
 
@@ -1058,27 +1038,29 @@ export class JourneyService {
     dto: PlanPlaceCreateBodyDto,
   ) {
     const j = await this.owned(userId, journeyId);
-    const plan = await this.ensurePlan(journeyId);
-    const visitTime = dto.recordedAt
-      ? this.normalizeVisitTime(dto.recordedAt)
-      : null;
-    const clientId = `p_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const place: PlanPlace = {
-      clientId,
-      name: String(dto.name ?? '').trim(),
-      note: dto.note ?? undefined,
-      coverUrl: dto.coverUrl ?? undefined,
-      lat: dto.lat != null ? Number(dto.lat) : null,
-      lng: dto.lng != null ? Number(dto.lng) : null,
-      visitTime,
-      dayIndex: this.deriveDayIndex(visitTime, j.startDate),
-      tags: dto.tags?.length ? dto.tags : undefined,
-      mediaIds: dto.mediaIds?.length ? dto.mediaIds : undefined,
-      sortOrder: (plan.places ?? []).length,
-    };
-    plan.places = [...(plan.places ?? []), place];
-    const saved = await this.plans.save(plan);
-    await this.seedPlanPlaceEntries(j, saved.places ?? []);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const plan = await this.ensurePlan(journeyId, manager);
+      const visitTime = dto.recordedAt
+        ? this.normalizeVisitTime(dto.recordedAt)
+        : null;
+      const clientId = `p_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const place: PlanPlace = {
+        clientId,
+        name: String(dto.name ?? '').trim(),
+        coverUrl: dto.coverUrl ?? undefined,
+        lat: dto.lat != null ? Number(dto.lat) : null,
+        lng: dto.lng != null ? Number(dto.lng) : null,
+        visitTime,
+        dayIndex: this.deriveDayIndex(visitTime, j.startDate),
+        tags: dto.tags?.length ? dto.tags : undefined,
+        mediaIds: dto.mediaIds?.length ? dto.mediaIds : undefined,
+        sortOrder: (plan.places ?? []).length,
+      };
+      plan.places = [...(plan.places ?? []), place];
+      const row = await manager.save(plan);
+      await this.seedPlanPlaceEntries(j, row.places ?? [], manager);
+      return row;
+    });
     return this.toPlanResponse(saved);
   }
 
@@ -1087,82 +1069,94 @@ export class JourneyService {
    * 幂等：clientId 不存在时返回现状；联动删除该点占位记录（仅 plan_place，不误删用户内容）。
    */
   async deletePlanPlace(userId: string, journeyId: string, clientId: string) {
-    const j = await this.owned(userId, journeyId);
-    const plan = await this.ensurePlan(journeyId);
-    const before = plan.places ?? [];
-    if (!before.some((p) => p.clientId === clientId)) {
-      return this.toPlanResponse(plan);
-    }
-    plan.places = before.filter((p) => p.clientId !== clientId);
-    const saved = await this.plans.save(plan);
-    await this.prunePlanPlaceEntries(journeyId, [clientId]);
+    await this.owned(userId, journeyId);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const plan = await this.ensurePlan(journeyId, manager);
+      const before = plan.places ?? [];
+      if (!before.some((p) => p.clientId === clientId)) {
+        return plan;
+      }
+      plan.places = before.filter((p) => p.clientId !== clientId);
+      const row = await manager.save(plan);
+      await this.prunePlanPlaceEntries(journeyId, [clientId], manager);
+      return row;
+    });
     return this.toPlanResponse(saved);
   }
 
   async putPlan(userId: string, journeyId: string, dto: UpsertPlanDto) {
     const j = await this.owned(userId, journeyId);
-    const plan = await this.ensurePlan(journeyId);
-    const incoming = (dto.places ?? []).map((p, i) =>
-      this.normalizePlaceInput(p as any, i, j.startDate),
-    );
-    // 按 clientId 幂等：同 id 更新合并字段；输入序为最终列表（可删点）
-    const prevIds = new Set((plan.places ?? []).map((p) => p.clientId));
-    plan.places = this.mergePlacesByClientId(plan.places ?? [], incoming);
-    const newIds = new Set((plan.places ?? []).map((p) => p.clientId));
-    const removedIds = [...prevIds].filter((id) => id && !newIds.has(id));
-    if (removedIds.length) {
-      // 删点联动：清掉对应占位记录（仅 plan_place）
-      await this.prunePlanPlaceEntries(journeyId, removedIds);
-    }
-    if (dto.checks !== undefined) {
-      plan.checks = (dto.checks ?? []).map((c) =>
-        this.normalizeCheckInput(c as any),
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const plan = await this.ensurePlan(journeyId, manager);
+      const incoming = (dto.places ?? []).map((p, i) =>
+        this.normalizePlaceInput(p as any, i, j.startDate),
       );
-    }
-    if (dto.budgetEstimate !== undefined) {
-      plan.budgetEstimate = dto.budgetEstimate;
-    }
-    const saved = await this.plans.save(plan);
-    await this.seedPlanPlaceEntries(j, saved.places ?? []);
+      const prevPlaces = [...(plan.places ?? [])];
+      // 按 clientId 幂等：同 id 更新合并字段；输入序为最终列表（可删点）
+      const prevIds = new Set((plan.places ?? []).map((p) => p.clientId));
+      plan.places = this.mergePlacesByClientId(plan.places ?? [], incoming);
+      const newIds = new Set((plan.places ?? []).map((p) => p.clientId));
+      const removedIds = [...prevIds].filter((id) => id && !newIds.has(id));
+      if (removedIds.length) {
+        // 删点联动：清掉对应占位记录（仅 plan_place）
+        await this.prunePlanPlaceEntries(journeyId, removedIds, manager);
+      }
+      if (dto.checks !== undefined) {
+        plan.checks = (dto.checks ?? []).map((c) =>
+          this.normalizeCheckInput(c as any),
+        );
+      }
+      if (dto.budgetEstimate !== undefined) {
+        plan.budgetEstimate = dto.budgetEstimate;
+      }
+      const row = await manager.save(plan);
+      await this.seedPlanPlaceEntries(j, row.places ?? [], manager, prevPlaces);
+      return row;
+    });
     return this.toPlanResponse(saved);
   }
 
   async patchPlan(userId: string, journeyId: string, dto: PatchPlanDto) {
     const j = await this.owned(userId, journeyId);
-    const plan = await this.ensurePlan(journeyId);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const plan = await this.ensurePlan(journeyId, manager);
 
-    if (dto.places) {
-      const prevIds = new Set((plan.places ?? []).map((p) => p.clientId));
-      plan.places = this.mergePlacesByClientId(
-        plan.places ?? [],
-        dto.places.map((p, i) =>
-          this.normalizePlaceInput(p as any, i, j.startDate),
-        ),
-      );
-      const newIds = new Set((plan.places ?? []).map((p) => p.clientId));
-      const removedIds = [...prevIds].filter((id) => id && !newIds.has(id));
-      if (removedIds.length) {
-        // 删点联动：清掉对应占位记录（仅 plan_place）
-        await this.prunePlanPlaceEntries(journeyId, removedIds);
+      let prevPlaces: PlanPlace[] | undefined;
+      if (dto.places) {
+        prevPlaces = [...(plan.places ?? [])];
+        const prevIds = new Set((plan.places ?? []).map((p) => p.clientId));
+        plan.places = this.mergePlacesByClientId(
+          plan.places ?? [],
+          dto.places.map((p, i) =>
+            this.normalizePlaceInput(p as any, i, j.startDate),
+          ),
+        );
+        const newIds = new Set((plan.places ?? []).map((p) => p.clientId));
+        const removedIds = [...prevIds].filter((id) => id && !newIds.has(id));
+        if (removedIds.length) {
+          // 删点联动：清掉对应占位记录（仅 plan_place）
+          await this.prunePlanPlaceEntries(journeyId, removedIds, manager);
+        }
       }
-    }
-    if (dto.checks) {
-      plan.checks = dto.checks.map((c) => this.normalizeCheckInput(c as any));
-    }
-    if (dto.budgetEstimate !== undefined) {
-      plan.budgetEstimate = dto.budgetEstimate;
-    }
-    const toggleId = dto.toggleCheckClientId ?? dto.toggleCheckId;
-    if (toggleId) {
-      plan.checks = (plan.checks ?? []).map((c) =>
-        c.clientId === toggleId ? { ...c, done: !c.done } : c,
-      );
-    }
+      if (dto.checks) {
+        plan.checks = dto.checks.map((c) => this.normalizeCheckInput(c as any));
+      }
+      if (dto.budgetEstimate !== undefined) {
+        plan.budgetEstimate = dto.budgetEstimate;
+      }
+      const toggleId = dto.toggleCheckClientId ?? dto.toggleCheckId;
+      if (toggleId) {
+        plan.checks = (plan.checks ?? []).map((c) =>
+          c.clientId === toggleId ? { ...c, done: !c.done } : c,
+        );
+      }
 
-    const saved = await this.plans.save(plan);
-    if (dto.places) {
-      await this.seedPlanPlaceEntries(j, saved.places ?? []);
-    }
+      const row = await manager.save(plan);
+      if (dto.places) {
+        await this.seedPlanPlaceEntries(j, row.places ?? [], manager, prevPlaces);
+      }
+      return row;
+    });
     return this.toPlanResponse(saved);
   }
 
@@ -1170,8 +1164,15 @@ export class JourneyService {
    * 把已填 visitTime 的预定点初始化成时间线记录（幂等）。
    * 触发：plan/save 添加地点 / 创建时带 visitTime / 开始旅程补漏。
    * 记录：createdAt=写入时刻；recordedAt=visitTime（这条记录对应哪天几点）。
+   * 传 manager 时在调用方事务内执行；否则自起事务。失败向上抛出回滚，
+   * 不再吞错（旧实现失败即静默不一致且无补偿）。
    */
-  private async seedPlanPlaceEntries(journey: Journey, places: PlanPlace[]) {
+  private async seedPlanPlaceEntries(
+    journey: Journey,
+    places: PlanPlace[],
+    manager?: EntityManager,
+    prevPlaces?: PlanPlace[],
+  ) {
     const named = (places ?? []).filter(
       (p) => String(p.name ?? '').trim() && p.visitTime,
     );
@@ -1187,55 +1188,113 @@ export class JourneyService {
     const clientIds = sorted.map((p) =>
       this.planPlaceEntryClientId(journey.id, p.clientId),
     );
-    const existing = await this.entries.find({
+    const existing = await (manager ?? this.entries.manager).find(Entry, {
       where: { clientId: In(clientIds) },
-      select: ['clientId'],
+      relations: ['location'],
     });
-    const have = new Set(existing.map((e) => e.clientId));
-    const todo = sorted.filter((p, i) => !have.has(clientIds[i]));
-    if (!todo.length) return;
+    const existingByClientId = new Map(
+      existing.map((e) => [e.clientId, e] as const),
+    );
+    const todo = sorted.filter((p, i) => !existingByClientId.has(clientIds[i]));
+    // 地点更新后同步已有占位记录（仅当调用方传入旧地点快照时启用，避免误动用户内容）
+    const syncTargets = prevPlaces
+      ? sorted.filter((p, i) => existingByClientId.has(clientIds[i]))
+      : [];
+    if (!todo.length && !syncTargets.length) return;
 
-    try {
-      await this.dataSource.transaction(async (manager) => {
-        for (const p of todo) {
-          const clientId = this.planPlaceEntryClientId(journey.id, p.clientId);
-          const recordedAt = this.recordedAtFromPlace(p, journey.startDate);
-          const hasCoord =
-            Number.isFinite(p.lat as number) && Number.isFinite(p.lng as number);
-          const dayIndex =
-            this.deriveDayIndex(p.visitTime ?? null, journey.startDate) ??
-            (p.dayIndex != null && p.dayIndex > 0 ? p.dayIndex : null);
-          const entry = await manager.save(
-            manager.create(Entry, {
-              journeyId: journey.id,
-              clientId,
-              type: hasCoord ? 'location' : 'text',
-              content: hasCoord ? '' : String(p.name).trim(),
-              recordedAt,
-              dayIndex,
-              payload: {
-                source: 'plan_place',
-                placeClientId: p.clientId,
-              },
+    const run = async (em: EntityManager) => {
+      for (const p of todo) {
+        const clientId = this.planPlaceEntryClientId(journey.id, p.clientId);
+        const recordedAt = this.recordedAtFromPlace(p, journey.startDate);
+        const hasCoord =
+          Number.isFinite(p.lat as number) && Number.isFinite(p.lng as number);
+        const dayIndex =
+          this.deriveDayIndex(p.visitTime ?? null, journey.startDate) ??
+          (p.dayIndex != null && p.dayIndex > 0 ? p.dayIndex : null);
+        const entry = await em.save(
+          em.create(Entry, {
+            journeyId: journey.id,
+            clientId,
+            type: hasCoord ? 'location' : 'text',
+            content: hasCoord ? '' : String(p.name).trim(),
+            recordedAt,
+            dayIndex,
+            payload: {
+              source: 'plan_place',
+              placeClientId: p.clientId,
+            },
+          }),
+        );
+        if (hasCoord) {
+          await em.save(
+            em.create(Location, {
+              entryId: entry.id,
+              lat: Number(p.lat),
+              lng: Number(p.lng),
+              name: String(p.locationName || p.name).trim().slice(0, 255),
             }),
           );
-          if (hasCoord) {
-            await manager.save(
-              manager.create(Location, {
+        }
+      }
+
+      for (const p of syncTargets) {
+        const clientId = this.planPlaceEntryClientId(journey.id, p.clientId);
+        const entry = existingByClientId.get(clientId);
+        const prev = (prevPlaces ?? []).find((x) => x.clientId === p.clientId);
+        if (!entry || !prev) continue;
+        const hasCoord =
+          Number.isFinite(p.lat as number) && Number.isFinite(p.lng as number);
+        const prevHasCoord =
+          Number.isFinite(prev.lat as number) &&
+          Number.isFinite(prev.lng as number);
+        // 旧自动内容：占位记录创建时按当时有无坐标生成（有坐标为 ''，否则地点名）
+        const prevAuto = prevHasCoord ? '' : String(prev.name ?? '').trim();
+        const nextAuto = hasCoord ? '' : String(p.name).trim();
+        const contentNow = entry.content ?? '';
+        let dirty = false;
+        // 自动内容判定：占位记录创建后从未被编辑（syncVersion<=1），或内容仍与旧自动值/空一致；
+        // 否则视为用户手写内容，不覆盖
+        const isAutoContent =
+          entry.syncVersion <= 1 || contentNow === '' || contentNow === prevAuto;
+        if (isAutoContent && contentNow !== nextAuto) {
+          entry.content = nextAuto;
+          entry.type = hasCoord ? 'location' : 'text';
+          dirty = true;
+        }
+        if (hasCoord) {
+          const lat = Number(p.lat);
+          const lng = Number(p.lng);
+          const locName = String(p.locationName || p.name)
+            .trim()
+            .slice(0, 255);
+          if (entry.location) {
+            if (
+              Number(entry.location.lat) !== lat ||
+              Number(entry.location.lng) !== lng ||
+              (entry.location.name ?? '') !== locName
+            ) {
+              entry.location.lat = lat;
+              entry.location.lng = lng;
+              entry.location.name = locName;
+              dirty = true;
+            }
+          } else {
+            // 地点后补坐标：占位记录补建定位
+            await em.save(
+              em.create(Location, {
                 entryId: entry.id,
-                lat: Number(p.lat),
-                lng: Number(p.lng),
-                name: String(p.locationName || p.name).trim().slice(0, 255),
+                lat,
+                lng,
+                name: locName,
               }),
             );
           }
         }
-      });
-    } catch (err) {
-      this.logger.error(
-        `seedPlanPlaceEntries failed journey=${journey.id}: ${(err as Error)?.message ?? err}`,
-      );
-    }
+        if (dirty) await em.save(entry);
+      }
+    };
+    if (manager) await run(manager);
+    else await this.dataSource.transaction(run);
   }
 
   private planPlaceEntryClientId(journeyId: string, placeClientId: string) {
@@ -1248,30 +1307,27 @@ export class JourneyService {
    * 删预定点时联动删除其占位记录（幂等）。
    * 仅删 payload.source === 'plan_place' 的记录，避免误删用户自己写的内容；
    * 匿名地点（p_anon_，无 clientId 的历史数据）不做联动。
+   * 传 manager 时在调用方事务内执行；失败向上抛出回滚，不再吞错。
    */
   private async prunePlanPlaceEntries(
     journeyId: string,
     removedClientIds: string[],
+    manager?: EntityManager,
   ) {
     const targets = removedClientIds
       .filter((id) => id && !id.startsWith('p_anon_'))
       .map((id) => this.planPlaceEntryClientId(journeyId, id));
     if (!targets.length) return;
-    try {
-      const rows = await this.entries.find({
-        where: { clientId: In(targets) },
-        select: ['id', 'payload'],
-      });
-      const ids = rows
-        .filter((e) => (e.payload as any)?.source === 'plan_place')
-        .map((e) => e.id);
-      if (ids.length) {
-        await this.entries.delete(ids);
-      }
-    } catch (err) {
-      this.logger.error(
-        `prunePlanPlaceEntries failed journey=${journeyId}: ${(err as Error)?.message ?? err}`,
-      );
+    const runner = manager ?? this.entries.manager;
+    const rows = await runner.find(Entry, {
+      where: { clientId: In(targets) },
+      select: ['id', 'payload'],
+    });
+    const ids = rows
+      .filter((e) => (e.payload as any)?.source === 'plan_place')
+      .map((e) => e.id);
+    if (ids.length) {
+      await runner.delete(Entry, ids);
     }
   }
 

@@ -57,14 +57,6 @@ export class Journey {
   @Column({ type: 'varchar', length: 16, default: 'planned' })
   status: JourneyStatus;
 
-  /** 主题标签英文 key JSON 数组 */
-  @Column({ type: 'json', nullable: true })
-  themeTags?: string[];
-
-  /** 同行人英文 key JSON 数组 */
-  @Column({ type: 'json', nullable: true })
-  companions?: string[];
-
   /** 预算上限（分）；API 兼容 budgetLimit */
   @Column({ type: 'int', nullable: true })
   budgetAmount?: number;

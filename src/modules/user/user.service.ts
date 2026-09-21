@@ -4,16 +4,13 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { User } from '../../entities/user.entity';
 import { YearBudget } from '../../entities/year-budget.entity';
 import { Journey } from '../../entities/journey.entity';
 import { Location } from '../../entities/location.entity';
-import { TravelIdentityDict } from '../../entities/travel-identity-dict.entity';
-import { UserIdentity } from '../../entities/user-identity.entity';
 import { StorageService } from '../../infrastructure/storage/storage.service';
 import { MemberBenefitService } from '../membership/member-benefit.service';
 import {
@@ -21,19 +18,15 @@ import {
   PatchUserProfileDto,
   UpsertBudgetDto,
 } from './user.dto';
+import { toUserResponse } from './user-response';
 import {
-  IDENTITY_MAX_SELECT,
-  TRAVEL_IDENTITIES,
-  findCity,
-  formatRegion,
-  listProvinces,
   maskPhone,
   validateNickname,
   containsSensitive,
 } from './profile.catalog';
 
 @Injectable()
-export class UserService implements OnModuleInit {
+export class UserService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(YearBudget)
@@ -42,63 +35,12 @@ export class UserService implements OnModuleInit {
     private readonly journeys: Repository<Journey>,
     @InjectRepository(Location)
     private readonly locations: Repository<Location>,
-    @InjectRepository(TravelIdentityDict)
-    private readonly identityDict: Repository<TravelIdentityDict>,
-    @InjectRepository(UserIdentity)
-    private readonly userIdentities: Repository<UserIdentity>,
     private readonly storage: StorageService,
     private readonly benefit: MemberBenefitService,
   ) {}
 
-  async onModuleInit() {
-    for (const item of TRAVEL_IDENTITIES) {
-      const exists = await this.identityDict.findOne({
-        where: { code: item.code },
-      });
-      if (!exists) {
-        await this.identityDict.save(
-          this.identityDict.create({
-            code: item.code,
-            name: item.name,
-            sort: item.sort,
-          }),
-        );
-      }
-    }
-  }
-
   private memberLevel(plan: string) {
     return plan === 'pro' ? 'PRO' : 'FREE';
-  }
-
-  private toLegacyUserResponse(
-    u: User,
-    extra?: {
-      identities?: string[];
-      footprintCities?: number;
-      tripCount?: number;
-    },
-  ) {
-    return {
-      ...u,
-      nick: u.nick ?? null,
-      nickname: u.nick ?? null,
-      avatarUrl: u.avatar ?? null,
-      gender: u.gender ?? 'UNKNOWN',
-      birthday: u.birthday ?? null,
-      provinceCode: u.provinceCode ?? null,
-      cityCode: u.cityCode ?? null,
-      departureCity: u.departureCity ?? null,
-      bio: u.bio ?? null,
-      createdAt: formatDateTime(u.createdAt),
-      updatedAt: formatDateTime(u.updatedAt),
-      memberLevel: this.memberLevel(u.plan),
-      identities: extra?.identities ?? [],
-      stats: {
-        footprintCities: extra?.footprintCities ?? 0,
-        tripCount: extra?.tripCount ?? 0,
-      },
-    };
   }
 
   async getById(id: string) {
@@ -106,11 +48,9 @@ export class UserService implements OnModuleInit {
     if (!u) throw new NotFoundException('user not found');
     // 读取时惰性降级：pro 且过期 → free（配额回退），仅变更时落库（幂等）。
     if (this.benefit.reconcileExpiry(u)) await this.users.save(u);
-    const identities = await this.userIdentities.find({ where: { userId: id } });
     const tripCount = await this.journeys.count({ where: { userId: id } });
     const footprintCities = await this.countFootprintCities(id);
-    return this.toLegacyUserResponse(u, {
-      identities: identities.map((i) => i.identityCode),
+    return toUserResponse(u, {
       footprintCities,
       tripCount,
     });
@@ -154,10 +94,6 @@ export class UserService implements OnModuleInit {
     if (!u) throw new NotFoundException('user not found');
     if (this.benefit.reconcileExpiry(u)) await this.users.save(u);
 
-    const identities = await this.userIdentities.find({
-      where: { userId },
-    });
-
     const tripCount = await this.journeys.count({ where: { userId } });
     const footprintCities = await this.countFootprintCities(userId);
 
@@ -165,16 +101,10 @@ export class UserService implements OnModuleInit {
       userId: u.id,
       nickname: u.nick ?? null,
       avatarUrl: u.avatar ?? null,
-      gender: u.gender ?? 'UNKNOWN',
-      birthday: u.birthday ?? null,
-      provinceCode: u.provinceCode ?? null,
-      cityCode: u.cityCode ?? null,
-      region: formatRegion(u.provinceCode, u.cityCode),
-      departureCity: u.departureCity ?? null,
+      gender: u.gender ?? 'FEMALE',
       bio: u.bio ?? null,
       phoneMasked: maskPhone(u.phone),
       memberLevel: this.memberLevel(u.plan),
-      identities: identities.map((i) => i.identityCode),
       stats: {
         footprintCities,
         tripCount,
@@ -223,53 +153,6 @@ export class UserService implements OnModuleInit {
       u.gender = dto.gender as User['gender'];
     }
 
-    if (dto.birthday !== undefined) {
-      if (dto.birthday === null || dto.birthday === '') {
-        u.birthday = undefined;
-      } else {
-        this.assertBirthday(dto.birthday);
-        u.birthday = dto.birthday;
-      }
-    }
-
-    if (dto.cityCode !== undefined || dto.provinceCode !== undefined) {
-      if (dto.cityCode === null || dto.cityCode === '') {
-        u.cityCode = undefined;
-        u.provinceCode = undefined;
-      } else {
-        const cityCode = dto.cityCode!;
-        const city = findCity(cityCode);
-        if (!city) {
-          throw new BadRequestException({
-            code: '40006',
-            message: '所在地编码无效',
-          });
-        }
-        const provinceCode = dto.provinceCode ?? city.provinceCode;
-        if (provinceCode !== city.provinceCode) {
-          throw new BadRequestException({
-            code: '40006',
-            message: '省市编码不匹配',
-          });
-        }
-        u.cityCode = city.cityCode;
-        u.provinceCode = city.provinceCode;
-      }
-    }
-
-    if (dto.departureCity !== undefined) {
-      if (dto.departureCity === null || dto.departureCity === '') {
-        u.departureCity = undefined;
-      } else if (dto.departureCity.length > 64) {
-        throw new BadRequestException({
-          code: '40001',
-          message: '常用出发地过长',
-        });
-      } else {
-        u.departureCity = dto.departureCity;
-      }
-    }
-
     if (dto.bio !== undefined) {
       if (dto.bio === null || dto.bio === '') {
         u.bio = undefined;
@@ -288,83 +171,12 @@ export class UserService implements OnModuleInit {
       }
     }
 
-    if (dto.identities !== undefined) {
-      await this.replaceIdentities(userId, dto.identities);
-    }
-
     await this.users.save(u);
     const profile = await this.getProfile(userId);
     return {
       updatedAt: formatDateTime(profile.updatedAt),
       profile,
     };
-  }
-
-  private assertBirthday(ymd: string) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
-    if (!m) {
-      throw new BadRequestException({
-        code: '40001',
-        message: '生日格式应为 YYYY-MM-DD',
-      });
-    }
-    const y = Number(m[1]);
-    const d = new Date(`${ymd}T00:00:00`);
-    if (Number.isNaN(d.getTime())) {
-      throw new BadRequestException({
-        code: '40001',
-        message: '生日日期无效',
-      });
-    }
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    if (y < 1900 || d > today) {
-      throw new BadRequestException({
-        code: '40001',
-        message: '生日须在 1900-01-01 至今天之间',
-      });
-    }
-  }
-
-  private async replaceIdentities(userId: string, codes: string[]) {
-    if (codes.length > IDENTITY_MAX_SELECT) {
-      throw new BadRequestException({
-        code: '40005',
-        message: `旅行身份最多选 ${IDENTITY_MAX_SELECT} 个`,
-      });
-    }
-    const unique = [...new Set(codes)];
-    if (unique.length) {
-      const found = await this.identityDict.find({
-        where: { code: In(unique) },
-      });
-      if (found.length !== unique.length) {
-        throw new BadRequestException({
-          code: '40004',
-          message: '旅行身份非法',
-        });
-      }
-    }
-    await this.userIdentities.delete({ userId });
-    for (const code of unique) {
-      await this.userIdentities.save(
-        this.userIdentities.create({ userId, identityCode: code }),
-      );
-    }
-  }
-
-  listIdentities() {
-    return {
-      maxSelect: IDENTITY_MAX_SELECT,
-      options: TRAVEL_IDENTITIES.map((i) => ({
-        code: i.code,
-        name: i.name,
-      })),
-    };
-  }
-
-  listRegions() {
-    return { provinces: listProvinces() };
   }
 
   async checkNickname(userId: string, nickname: string) {

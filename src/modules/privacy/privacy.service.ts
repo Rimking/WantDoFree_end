@@ -49,8 +49,6 @@ export class PrivacyService {
           startDate: j.startDate,
           endDate: j.endDate,
           status: j.status,
-          themeTags: j.themeTags,
-          companions: j.companions,
           budgetAmount: j.budgetAmount,
           isPublic: j.isPublic,
           coverUrl: j.coverUrl,

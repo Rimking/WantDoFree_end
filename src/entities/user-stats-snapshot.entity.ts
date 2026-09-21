@@ -3,14 +3,12 @@ import {
   PrimaryGeneratedColumn,
   Column,
   UpdateDateColumn,
-  Index,
   Unique,
 } from 'typeorm';
 
 /** 用户统计日快照（物化计数，避免全表扫） */
 @Entity('user_stats_snapshots')
 @Unique('UQ_stats_user_date', ['userId', 'date'])
-@Index('idx_stats_user_date', ['userId', 'date'])
 export class UserStatsSnapshot {
   @PrimaryGeneratedColumn('uuid')
   id: string;

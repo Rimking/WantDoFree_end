@@ -44,7 +44,8 @@ export class ChecklistJourneyController {
   }
 
   @Post('checklist/reorder')
-  @HttpCode(204)
+  // 响应统一 { code, data, message }：不能再走 204 无响应体
+  @HttpCode(200)
   reorderPost(
     @CurrentUser() u: { id: string },
     @Body() body: ChecklistReorderBodyDto,
@@ -78,7 +79,8 @@ export class ChecklistController {
   }
 
   @Post('delete')
-  @HttpCode(204)
+  // 响应统一 { code, data, message }：不能再走 204 无响应体
+  @HttpCode(200)
   deletePost(
     @CurrentUser() u: { id: string },
     @Body() body: ChecklistIdBodyDto,

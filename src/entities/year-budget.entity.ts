@@ -7,7 +7,6 @@ import {
   ManyToOne,
   JoinColumn,
   Unique,
-  Index,
 } from 'typeorm';
 import { User } from './user.entity';
 
@@ -18,7 +17,7 @@ export class YearBudget {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
+  // UQ_year_budgets_user_year 的最左前缀已覆盖 userId 查询，无需单独索引
   @Column({ length: 36 })
   userId: string;
 

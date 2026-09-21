@@ -1,12 +1,9 @@
 import {
-  ArrayMaxSize,
-  IsArray,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   Length,
-  Matches,
   Max,
   MaxLength,
   Min,
@@ -21,40 +18,13 @@ export class UpsertBudgetDto {
 export class PatchUserProfileDto {
   @IsOptional() @IsString() nickname?: string;
   @IsOptional() @IsString() avatarUrl?: string;
-  @IsOptional() @IsIn(['MALE', 'FEMALE', 'UNKNOWN']) gender?: string;
-  /** YYYY-MM-DD 或 null 清空 */
-  @IsOptional()
-  @ValidateIf((_, v) => v !== null && v !== '')
-  @Matches(/^\d{4}-\d{2}-\d{2}$/)
-  birthday?: string | null;
-
-  @IsOptional()
-  @ValidateIf((_, v) => v !== null && v !== '')
-  @Matches(/^\d{6}$/)
-  provinceCode?: string | null;
-
-  @IsOptional()
-  @ValidateIf((_, v) => v !== null && v !== '')
-  @Matches(/^\d{6}$/)
-  cityCode?: string | null;
-
-  @IsOptional()
-  @ValidateIf((_, v) => v !== null && v !== '')
-  @IsString()
-  @MaxLength(64)
-  departureCity?: string | null;
+  @IsOptional() @IsIn(['MALE', 'FEMALE']) gender?: string;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null && v !== '')
   @IsString()
   @MaxLength(40)
   bio?: string | null;
-
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(3)
-  @IsString({ each: true })
-  identities?: string[];
 }
 
 export class AvatarPresignDto {

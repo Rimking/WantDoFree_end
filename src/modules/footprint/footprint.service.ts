@@ -1,4 +1,5 @@
 import { formatDateTime } from '../../common/datetime.util';
+import { citySql, eligibleEntrySql, validLocationSql } from '../../common/progress-sql';
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -102,15 +103,13 @@ export class FootprintService {
 
   private async countCities(userId: string, journeyIds: string[]) {
     if (!journeyIds.length) return 0;
-    const raw = await this.locations
-      .createQueryBuilder('loc')
-      .innerJoin('loc.entry', 'entry')
+    const raw = await this.entries
+      .createQueryBuilder('entry')
       .innerJoin('entry.journey', 'journey')
-      .select('COUNT(DISTINCT loc.name)', 'cnt')
+      .select(`COUNT(DISTINCT ${citySql('entry')})`, 'cnt')
       .where('journey.userId = :userId', { userId })
       .andWhere('entry.journeyId IN (:...journeyIds)', { journeyIds })
-      .andWhere('loc.name IS NOT NULL')
-      .andWhere("loc.name != ''")
+      .andWhere(eligibleEntrySql('entry'))
       .getRawOne();
     return Number(raw?.cnt ?? 0);
   }
@@ -169,26 +168,24 @@ export class FootprintService {
       };
     }
 
-    const grouped = await this.locations
-      .createQueryBuilder('loc')
-      .innerJoin('loc.entry', 'entry')
-      .innerJoin('entry.journey', 'journey')
-      .select('loc.name', 'name')
-      .addSelect('COUNT(*)', 'visitCount')
-      .addSelect('MAX(COALESCE(entry.recordedAt, entry.createdAt))', 'lastVisitedAt')
-      .addSelect('MAX(loc.lat)', 'lat')
-      .addSelect('MAX(loc.lng)', 'lng')
-      .where('journey.userId = :userId', { userId })
-      .andWhere('entry.journeyId IN (:...journeyIds)', { journeyIds })
-      .andWhere('loc.name IS NOT NULL')
-      .andWhere("loc.name != ''")
-      .groupBy('loc.name')
-      .orderBy('lastVisitedAt', 'DESC')
-      .getRawMany();
-
-    const total = grouped.length;
-    const slice = grouped.slice((page - 1) * pageSize, page * pageSize);
-    const list = slice.map((r) => ({
+    const total = await this.countCities(userId, journeyIds);
+    // 坐标来自同一条最新记录，禁止分别 MAX(lat/lng) 拼出不存在的点。
+    const rows = await this.entries.query(`WITH city_records AS (
+      SELECT ${citySql('entry')} AS name,
+        COALESCE(entry.recordedAt, entry.createdAt) AS lastVisitedAt,
+        loc.lat, loc.lng,
+        COUNT(*) OVER (PARTITION BY ${citySql('entry')}) AS visitCount,
+        ROW_NUMBER() OVER (PARTITION BY ${citySql('entry')}
+          ORDER BY COALESCE(entry.recordedAt, entry.createdAt) DESC, entry.id DESC) AS rn
+      FROM entries entry
+      INNER JOIN journeys journey ON journey.id = entry.journeyId
+      LEFT JOIN locations loc ON loc.entryId = entry.id AND ${validLocationSql('loc')}
+      WHERE journey.userId = ? AND ${citySql('entry')} IS NOT NULL
+        AND ${eligibleEntrySql('entry')}
+    ) SELECT name, visitCount, lastVisitedAt, lat, lng FROM city_records
+      WHERE rn = 1 ORDER BY lastVisitedAt DESC, name ASC LIMIT ? OFFSET ?`,
+    [userId, pageSize, (page - 1) * pageSize]);
+    const list = rows.map((r) => ({
       name: String(r.name).trim(),
       visitCount: Number(r.visitCount ?? 0),
       lastVisitedAt: r.lastVisitedAt ?? null,

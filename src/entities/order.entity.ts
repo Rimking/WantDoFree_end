@@ -30,7 +30,8 @@ export class Order {
   @Column({ type: 'varchar', length: 16, default: 'pending' })
   status: 'pending' | 'paid' | 'closed' | 'refunded' | 'expired';
 
-  @Column({ nullable: true, length: 64 })
+  /** 支付流水号（回调幂等键；唯一约束防重复入账） */
+  @Column({ nullable: true, length: 64, unique: true })
   transactionId?: string;
 
   @Column({ type: 'datetime', nullable: true })

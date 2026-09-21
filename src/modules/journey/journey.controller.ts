@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { JourneyService } from './journey.service';
 import { JourneyAggregateService } from './journey-aggregate.service';
+import { JourneyMapService } from './journey-map.service';
 import { CreateJourneyDto } from './journey.dto';
 import {
   HandbookListBodyDto,
@@ -15,6 +16,8 @@ import {
   JourneyIdBodyDto,
   JourneyItemDetailBodyDto,
   JourneyListBodyDto,
+  JourneyMapPlaceNotesBodyDto,
+  JourneyMapSummaryBodyDto,
   JourneyPlanGetBodyDto,
   JourneyPlanPlaceDeleteBodyDto,
   PlanPlaceCreateBodyDto,
@@ -36,6 +39,7 @@ export class JourneyController {
   constructor(
     private readonly journey: JourneyService,
     private readonly aggregate: JourneyAggregateService,
+    private readonly journeyMap: JourneyMapService,
   ) {}
 
   // ─── 新契约：静态路径优先 ───────────────────────────────
@@ -117,6 +121,27 @@ export class JourneyController {
       throw new BadRequestException('journeyId or id is required');
     }
     return this.aggregate.handbookDetail(u.id, journeyId);
+  }
+
+  /**
+   * 地图聚合：笔记地点摘要（名称/坐标/封面/笔记数）。
+   * journeyId 缺省 = 全部旅程（全局足迹地图）；点击地点后再拉 place/notes。
+   */
+  @Post('map/summary')
+  mapSummary(
+    @CurrentUser() u: { id: string },
+    @Body() body: JourneyMapSummaryBodyDto,
+  ) {
+    return this.journeyMap.summary(u.id, body.journeyId);
+  }
+
+  /** 地图聚合：某地点的笔记明细（点击地点后调用） */
+  @Post('map/place/notes')
+  mapPlaceNotes(
+    @CurrentUser() u: { id: string },
+    @Body() body: JourneyMapPlaceNotesBodyDto,
+  ) {
+    return this.journeyMap.placeNotes(u.id, body.anchorId, body.journeyId);
   }
 
   @Post('update')

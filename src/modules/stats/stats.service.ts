@@ -19,6 +19,8 @@ import {
   normalizeStatus,
 } from '../../common/enums/catalog';
 import { StatsRange, StatsRangeQueryDto, RangeType } from './stats.dto';
+import { SUCCESS_CODE } from '../../common/response';
+import { citySql, eligibleEntrySql } from '../../common/progress-sql';
 
 @Injectable()
 export class StatsService {
@@ -36,8 +38,9 @@ export class StatsService {
     private readonly snapshots: Repository<UserStatsSnapshot>,
   ) {}
 
+  /** stats 响应需额外顶层字段 range，故自行包裹（成功码与全局一致，勿写 0）。 */
   private ok<T>(data: T, range: StatsRange) {
-    return { code: 0 as const, message: 'ok', data, range };
+    return { code: SUCCESS_CODE, message: 'ok', data, range };
   }
 
   private todayYmd() {
@@ -64,7 +67,8 @@ export class StatsService {
       const year = q.start?.slice(0, 4) || String(new Date().getFullYear());
       if (!/^\d{4}$/.test(year)) {
         throw new BadRequestException({
-          code: 400,
+          // 与全局参数错误码一致（4xxxx），避免前端多一套数字码
+          code: '40001',
           message: 'year 范围需提供 start=YYYY 或合法年份',
         });
       }
@@ -81,7 +85,8 @@ export class StatsService {
       const ym = q.start?.slice(0, 7) || today.slice(0, 7);
       if (!/^\d{4}-\d{2}$/.test(ym)) {
         throw new BadRequestException({
-          code: 400,
+          // 与全局参数错误码一致（4xxxx），避免前端多一套数字码
+          code: '40001',
           message: 'month 范围需提供 start=YYYY-MM',
         });
       }
@@ -100,13 +105,13 @@ export class StatsService {
     // custom
     if (!q.start || !q.end) {
       throw new BadRequestException({
-        code: 400,
+        code: '40001',
         message: 'custom 范围必须同时提供 start 与 end（YYYY-MM-DD）',
       });
     }
     if (q.end < q.start) {
       throw new BadRequestException({
-        code: 400,
+        code: '40001',
         message: 'end 不能早于 start',
       });
     }
@@ -115,7 +120,7 @@ export class StatsService {
     const days = Math.floor((endMs - startMs) / 86400000) + 1;
     if (days > 366 * 2) {
       throw new BadRequestException({
-        code: 400,
+        code: '40001',
         message: '自定义时间跨度不能超过 2 年',
       });
     }
@@ -233,14 +238,14 @@ export class StatsService {
     const qb = this.entries
       .createQueryBuilder('e')
       .leftJoin('e.location', 'loc')
-      .select('e.city', 'city')
+      .select(`CASE WHEN ${eligibleEntrySql('e')} THEN ${citySql('e')} ELSE NULL END`, 'city')
       .addSelect('COUNT(DISTINCT e.id)', 'cnt')
       .addSelect(
         'COUNT(DISTINCT CASE WHEN loc.id IS NOT NULL THEN e.id END)',
         'locatedCnt',
       )
       .where('e.journeyId IN (:...journeyIds)', { journeyIds })
-      .groupBy('e.city');
+      .groupBy(`CASE WHEN ${eligibleEntrySql('e')} THEN ${citySql('e')} ELSE NULL END`);
     this.applyEntryTime(qb, 'e', startAt, endAt);
     const rows = await qb.getRawMany();
     const cities = new Set<string>();
@@ -272,11 +277,12 @@ export class StatsService {
     const qb = this.entries
       .createQueryBuilder('e')
       .select('e.journeyId', 'journeyId')
-      .addSelect('e.city', 'city')
+      .addSelect(citySql('e'), 'city')
       .where('e.journeyId IN (:...journeyIds)', { journeyIds })
-      .andWhere("e.city IS NOT NULL AND TRIM(e.city) != ''")
+      .andWhere(`${citySql('e')} IS NOT NULL`)
+      .andWhere(eligibleEntrySql('e'))
       .groupBy('e.journeyId')
-      .addGroupBy('e.city');
+      .addGroupBy(citySql('e'));
     this.applyEntryTime(qb, 'e', startAt, endAt);
     const raw = await qb.getRawMany();
     for (const r of raw) {
