@@ -16,10 +16,7 @@ import {
 } from '../../common/enums/catalog';
 import { MediaService } from '../media/media.service';
 import { toLegacyKind } from '../media/media.util';
-import {
-  HANDBOOK_MIN_RECORDS,
-  normalizeGuideTemplateId,
-} from '../../common/handbook';
+import { normalizeGuideTemplateId } from '../../common/handbook';
 
 type GuidePayload = {
   highlights: Array<{
@@ -87,29 +84,7 @@ export class GuideService {
       (e) => e.type === 'location' || Boolean(e.location),
     );
 
-    if (entries.length < HANDBOOK_MIN_RECORDS) {
-      return {
-        canGenerate: false as const,
-        reason: `再多记几笔（至少 ${HANDBOOK_MIN_RECORDS} 条记录）再生成游记`,
-        stats: {
-          entryCount: entries.length,
-          minRecords: HANDBOOK_MIN_RECORDS,
-          hasPhoto,
-          hasLocation,
-        },
-      };
-    }
-    if (!hasPhoto && !hasLocation) {
-      return {
-        canGenerate: false as const,
-        reason: '再多记几笔（需要至少一张照片或一个定位）',
-        stats: {
-          entryCount: entries.length,
-          hasPhoto,
-          hasLocation,
-        },
-      };
-    }
+    // 不设门槛：0 条记录也可生成游记（原先要求 ≥3 条且含照片/定位，已取消）
     return {
       canGenerate: true as const,
       reason: null,

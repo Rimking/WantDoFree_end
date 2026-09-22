@@ -193,7 +193,6 @@ export class JourneyService {
   private emptyHandbook(recordCount = 0) {
     return {
       phase: resolveHandbookPhase({
-        recordCount,
         hasGuide: false,
         hasShared: false,
       }) as HandbookPhase,
@@ -251,7 +250,7 @@ export class JourneyService {
       const hasGuide = Boolean(guide?.payload);
       const hasShared = shareTickets.length > 0 || eventCount > 0;
       const recordCount = Number(item.recordCount ?? item.entryCount ?? 0);
-      const phase = resolveHandbookPhase({ recordCount, hasGuide, hasShared });
+      const phase = resolveHandbookPhase({ hasGuide, hasShared });
       item.handbookPhase = phase;
       item.hasGuide = hasGuide;
       item.handbook = {
@@ -389,7 +388,7 @@ export class JourneyService {
   toHandbookModule(item: Record<string, any>) {
     const hb = item.handbook ?? this.emptyHandbook(item.recordCount ?? 0);
     return {
-      phase: hb.phase ?? item.handbookPhase ?? 'need_more',
+      phase: hb.phase ?? item.handbookPhase ?? 'ready',
       recordCount: hb.recordCount ?? item.recordCount ?? 0,
       minRecords: hb.minRecords ?? HANDBOOK_MIN_RECORDS,
       hasGuide: hb.hasGuide ?? item.hasGuide ?? false,
